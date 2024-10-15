@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 import numpy as np
 
+from PyQuN.Model import Element
 
 
 class Vectorizer(ABC):
@@ -8,12 +9,12 @@ class Vectorizer(ABC):
 
 
     @abstractmethod
-    def vectorize(self, element):
+    def vectorize(self, element:Element) -> np.ndarray:
         #takes as input an element and returns a vector representation of it
         pass
 
     @abstractmethod
-    def dim(self):
+    def dim(self) -> int:
         pass
 
 
@@ -62,7 +63,7 @@ class MeanCountVectorizer(Vectorizer):
 
 class VectorizedModelSet:
     #takes as input a vectorizer and augments each element with a vector representation of it
-    def __init__(self, model_set, vectorizer):
+    def __init__(self, model_set:'ModelSet', vectorizer:Vectorizer) -> None:
         self.model_set = model_set
         self.index_id_map = []
         self.id_index_map = {}
@@ -82,10 +83,10 @@ class VectorizedModelSet:
     def get_vec_mat(self):
         return self.vec_mat
 
-    def get_vec_index(self, element):
+    def get_vec_index(self, element:Element) -> int:
         return self.id_index_map[element.get_id()]
 
-    def get_ele_by_index(self, index):
+    def get_ele_by_index(self, index:int) -> Element:
         return self.model_set.get_by_id(self.index_id_map[index])
 
 

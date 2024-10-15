@@ -1,22 +1,26 @@
 import uuid
 from abc import ABC, abstractmethod
+import typeguard
 
 import numpy as np
+from typing import Any, Union, Iterable, Set
 from collections import OrderedDict
 
-from PyQuN_Lab.Vectorization import VectorizedModelSet
+from PyQuN_Lab.Vectorization import VectorizedModelSet, Vectorizer
 
+class DataModel(ABC):
+    pass
 
 class Attribute(ABC):
     '''smallest component of the RaQuN data model
         Attributes with concrete datatypes extend this class
     '''
 
-    def __init__(self, value=None):
+    def __init__(self, value:Any = None)-> None:
         self.value = value
 
     @abstractmethod
-    def dist(self, other):
+    def dist(self, other:'Attribute') -> int:
         pass
 
     @abstractmethod
@@ -33,12 +37,12 @@ class Attribute(ABC):
 
     # takes a string representation of the attribute and parses it
     @abstractmethod
-    def parse_string(self, encoding):
+    def parse_string(self, encoding:str) -> None:
         pass
 
 
 class DefaultAttribute(Attribute, ABC):
-    def __init__(self, value=None):
+    def __init__(self, value:Any = None) -> None:
         super().__init__(value)
 
     def dist(self, other):
@@ -54,14 +58,14 @@ class DefaultAttribute(Attribute, ABC):
         return hash(self.value)
 
     def __repr__(self):
-        return repr(self.value)
+        return f"{self.__class__.__name__}(value={self.value})"
 
     def parse_string(self, encoding):
         self.value = encoding
 
 
 class StringAttribute(DefaultAttribute):
-    def __init__(self, value=None):
+    def __init__(self, value:str = None) -> None:
         if not value is None and not isinstance(value, str):
             raise ValueError(f"StringAttribute must be initialized with a string. Got {type(value)} instead.")
 
@@ -70,7 +74,7 @@ class StringAttribute(DefaultAttribute):
 
 class Element:
 
-    def __init__(self, attributes=None, name=None):
+    def __init__(self, attributes:Set[Attribute] = None, name:str = None) -> None:
         if attributes is None:
             attributes = set()
         else:
@@ -86,25 +90,25 @@ class Element:
         self.name = name
         self.model_id = None
 
-    def get_name(self):
+    def get_name(self) -> str:
         return self.name
 
-    def add_attr(self, attribute):
+    def add_attr(self, attribute:Attribute) -> None:
         self.attributes.add(attribute)
 
-    def set_model_id(self,model_id):
+    def set_model_id(self,model_id:uuid.UUID) -> None:
         self.model_id = model_id
 
-    def get_id(self):
+    def get_id(self) -> uuid.UUID:
         return self.ele_id
 
-    def set_element_id(self, element_id):
+    def set_element_id(self, element_id:uuid.UUID) -> None:
         self.ele_id = element_id
 
-    def get_model_id(self):
+    def get_model_id(self) -> uuid.UUID:
         return self.model_id
 
-    def set_name(self, name):
+    def set_name(self, name : str):
         self.name = name
 
     def __iter__(self):
@@ -117,8 +121,8 @@ class Element:
         return self.ele_id == other.get_id()
 
     def __repr__(self):
-        print(self.attributes)
-        return "Element_id: "+repr(self.ele_id)+"\n"+'\n'.join(["[" + repr(attr) + "]" for attr in self.attributes])
+        attrs = ', '.join([repr(attr) for attr in self.attributes])
+        return f"Element(id={self.ele_id}, name={self.name}, attrs=[{attrs}])"
 
     def __hash__(self):
         return hash(self.ele_id)
@@ -126,7 +130,7 @@ class Element:
 
 class Model:
 
-    def __init__(self, elements=None):
+    def __init__(self, elements:Set[Element] = None) -> None:
         if elements is None:
             elements = set()
         else:
@@ -138,19 +142,27 @@ class Model:
                 raise ValueError("All elements of the set must be instances of Attribute.")
 
         self.elements = elements
+        self.model_set = None
         self.id = uuid.uuid4()
 
-    def add_element(self, element):
+    def set_model_set(self, model_set : 'ModelSet') -> None:
+        self.model_set = model_set
+
+
+
+    def add_element(self, element:Element) -> None:
         self.elements.add(element)
         element.set_model_id(self.id)
+        self.model_set.notify_ele_add(element)
 
-    def remove_element(self, element):
+    def remove_element(self, element:Element) -> None:
         self.elements.remove(element)
+        self.model_set.notify_ele_del(element)
 
-    def get_id(self):
+    def get_id(self) -> uuid.UUID:
         return self.id
 
-    def get_elements(self):
+    def get_elements(self) -> Set[Element]:
         return self.elements
 
     def __len__(self):
@@ -166,12 +178,12 @@ class Model:
         return hash(self.id)
 
     def __repr__(self):
-        return "Model_id: "+repr(self.id)+"\n"+"\n".join(["{" + repr(ele) + "}" for ele in self.elements])
+        return f"Model(id={self.id}, num_elements={len(self.elements)})"
 
 
-class ModelSet:
+class ModelSet(DataModel):
 
-    def __init__(self, models=None, id_dictionary=True):
+    def __init__(self, models:Set[Model] = None, id_dictionary:bool = True) -> None :
         if models is None:
             models = set()
         else:
@@ -186,8 +198,9 @@ class ModelSet:
         self.id_map = {}
         self.__elements = set()
         for m in models:
-            for e in m.get_elements():
-                self.__elements.add(e)
+            self.__elements.update(m.get_elements())
+            m.set_model_set(self)
+
         self.use_dictionary = id_dictionary
         if id_dictionary:
             self._innit_id_map()
@@ -197,21 +210,18 @@ class ModelSet:
         return iter(self.models)
 
     def __len__(self):
-        tot = 0
-        for model in self.models:
-            tot += len(model)
-        return tot
+        return len(self.models)
 
     def __repr__(self):
-        return "\n".join(["{"+repr(m)+"}" for m in self.models])
+        return f"ModelSet(num_models={len(self.models)}, num_elements={len(self.get_elements())})"
 
-    def _innit_id_map(self):
+    def _innit_id_map(self) -> None:
         for model in self.models:
             self.id_map[model.get_id()] = model
             for ele in model:
                 self.id_map[ele.get_id()] = ele
 
-    def _linear_id_search(self, id):
+    def _linear_id_search(self, id:uuid.UUID) -> Union[Model, Element]:
         for model in self.models:
             if model.get_id() == id:
                 return model
@@ -221,7 +231,7 @@ class ModelSet:
         raise KeyError(f"Id '{id}' was not found in the ModelSet.")
 
     # returns the model/element corresponding to an id
-    def get_by_id(self, id):
+    def get_by_id(self, id: uuid.UUID) -> Union[Model, Element]:
         if self.use_dictionary:
             if not self.id_map:
                 self._innit_id_map()
@@ -233,29 +243,39 @@ class ModelSet:
             return self._linear_id_search(id)
 
     # returns a set of all the elements in the models
-    def get_elements(self):
+    def get_elements(self) -> Set[Element]:
         return self.__elements
 
-    def add_model(self, model):
+    def notify_ele_add(self, ele:Element) -> None:
+        self.__elements.add(ele)
+        if self.use_dictionary:
+            self.id_map[ele.get_id()] = ele
+
+    def notify_ele_del(self, ele:Element) -> None:
+        self.__elements.remove(ele)
+        if self.use_dictionary:
+            del self.id_map[ele.get_id()]
+
+
+    def add_model(self, model:Model) -> None:
         self.models.add(model)
-        for e in model:
-            self.__elements.add(e)
+        self.__elements.update(model.get_elements())
+        model.set_model_set(self)
         if self.use_dictionary:
             self.id_map[model.get_id()] = model
             for ele in model:
                 self.id_map[ele.get_id()] = ele
 
-    def remove_model(self, model):
+    def remove_model(self, model:Model) -> None:
         self.models.remove(model)
-        for e in model:
-            self.__elements.remove(e)
+        self.__elements.difference_update(model.get_elements())
         if self.use_dictionary:
             del self.id_map[model.get_id()]
             for ele in model:
                 del self.id_map[ele.get_id()]
 
 
-    def vectorize(self, vectorizer):
+    def vectorize(self, vectorizer:Vectorizer) -> VectorizedModelSet:
         return VectorizedModelSet(self, vectorizer)
 
 
@@ -266,7 +286,7 @@ class MatchViolation(Exception):
 
 
 class Match:
-    def __init__(self, elements=set(), do_check=True):
+    def __init__(self, elements:Set[Element] = set(), do_check:bool = True) -> None:
         self.id = uuid.uuid4()
         self.eles = set()
         if do_check and not self.are_valid(elements):
@@ -283,10 +303,15 @@ class Match:
     def __iter__(self):
         return iter(self.eles)
 
-    def get_elements(self):
+    def __repr__(self):
+        elements_preview = ', '.join([repr(ele) for ele in list(self.eles)[:3]])  # Show up to 3 elements
+        return f"Match(id={self.id}, num_elements={len(self.eles)}, elements=[{elements_preview}]...)"
+
+
+    def get_elements(self) -> Set[Element]:
         return self.eles
 
-    def add_elements(self, *elements):
+    def add_elements(self, *elements:Element) -> None:
 
         if self.do_check and not self.are_valid(elements):
             raise MatchViolation()
@@ -294,21 +319,40 @@ class Match:
         eles_copy.update(elements)
         return Match(eles_copy, self.do_check)
 
-    def is_valid(self, element):
-        for ele in self.eles:
-            if element.get_model_id() == ele.get_model_id():
-                return False
+
+    def are_valid(self, elements: Iterable[Element]) -> bool:
+        seen_eles = set()
+
+        for ele in elements:
+            # Check within elements to ensure no duplicates
+            if ele in seen_eles:
+                return False  # Duplicate found
+            seen_eles.add(ele)
+
+            # Check against elements in self.eles
+            for ele2 in self.eles:
+                if ele.get_model_id() == ele2.get_model_id():
+                    return False
+            # Check against other elements in elements
+            for ele2 in elements:
+                if ele != ele2 and ele.get_model_id() == ele2.get_model_id():
+                    return False
+
+        # If no violations found
         return True
 
-    def are_valid(self, elements):
-        for ele in elements:
-            if not self.is_valid(ele):
-                return False
         return True
 
     @staticmethod
-    def merge_matches(*matches, do_check=True):
-        eles = {}
+    def valid_merge(*matches:'Match') -> bool:
+        eles = set()
+        for m in matches:
+            eles.update(m.get_elements())
+        return Match().are_valid(eles)
+
+    @staticmethod
+    def merge_matches(*matches:'Match', do_check:bool = True) -> None:
+        eles = set()
         if len(matches) == 1:
             return matches[0]
 
@@ -321,37 +365,40 @@ class Match:
 # the matching Candidates consists of a ordered list of valid matches, without the requirement that the matches need to be
 # mutually exclusive
 class MatchCandidates:
-    def __init__(self):
+    def __init__(self) -> None:
         self.is_sorted = True
         self.matches = OrderedDict()
 
-    def add_matches(self, *matches):
+    def __iter__(self):
+        return iter(self.matches.keys())
+
+    def add_matches(self, *matches:Match) -> None:
         for match in matches:
             self.matches[match] = None
         if len(matches) > 0:
             self.is_sorted = False
 
     # removes all candidates whoms similarity lies below a certain threshold
-    def filter(self, similarity, threshold):
+    def filter(self, similarity:'Similarity', threshold:float) -> None:
         keys_to_remove = [key for key, value in self.matches.items() if similarity.similarity(key) < threshold]
         for key in keys_to_remove:
             del self.matches[key]
 
     # sort candidates matches accoriding to a similarity fucntion
-    def sort(self, similarity):
+    def sort(self, similarity:'Similarity'):
         self.matches = OrderedDict(
             sorted(self.matches.items(), key=lambda item: similarity.similarity(item[0]), reverse=True))
         self.is_sorted = True
 
     # returns the first match of the match candidates, should be called after sorting the matches to get the candidate
     # with the highest similarity
-    def head(self):
+    def head(self) -> Match:
         if self.is_sorted:
             return next(iter(self.matches))
         else:
             raise Exception("you need to call the sort function before calling this method")
 
-    def pop(self):
+    def pop(self) -> Match:
         if self.is_sorted:
             ne = self.head()
             self.delete(ne)
@@ -359,49 +406,62 @@ class MatchCandidates:
         else:
             raise Exception("you need to call the sort function before calling this method")
 
-    def is_empty(self):
+    def is_empty(self) -> bool:
         return len(self.matches) == 0
 
-    def delete(self, match):
+    def delete(self, match:Match) -> None:
         del self.matches[match]
+
+    def __repr__(self):
+        # Convert all matches into string representations
+        all_matches = "\n".join([repr(match) for match in self.matches])
+        return f"MatchCandidates(num_matches={len(self.matches)}, is_sorted={self.is_sorted}, matches=\n{all_matches})"
 
 
 # this class represents the matching object on which the algorithm operates in the third phase of the algorithm.
 # it enforces that the collection of matches is mutually exclusive
 
 class Matching:
-    def __init__(self):
+    def __init__(self) -> None:
         self.matches = set()
 
-    def trivial_matching(self, model_set):
-        self.matches = set()
-        for element in model_set.get_elements():
-            self.matches.add(Match({element}))
-
-    def get_match_by_element(self, ele):
+    def get_match_by_element(self, ele:Element) -> Match:
         for m in self.matches:
             if ele in m:
                 return m
         raise ValueError("element is not contained in the matching")
 
     # merges a collection of matches
-    def merge_matches(self, *matches):
+    def merge_matches(self, *matches:Match, do_check:bool = True) -> None:
         for match in matches:
             self.matches.remove(match)
-        self.matches.add(Match.merge_matches(matches, do_chek=False))
+        self.matches.add(Match.merge_matches(*matches, do_check=do_check))
+
+    def __repr__(self):
+        matches_preview = ', '.join([repr(match) for match in list(self.matches)[:3]])  # Show up to 3 matches
+        return f"Matching(num_matches={len(self.matches)}, matches=[{matches_preview}]...)"
+
+    @staticmethod
+    def trivial_matching(model_set:ModelSet) -> 'Matching':
+        matching = Matching()
+        matching.matches = set()
+        for element in model_set.get_elements():
+            matching.matches.add(Match({element}))
+        return matching
 
 
 if __name__ == "__main__":
     from PyQuN_Lab.Matching import GreedyMatching
     from PyQuN_Lab.CandidateSearch import NNCandidateSearch
     from PyQuN_Lab.DataLoading import CSVLoader
-    from PyQuN_Lab.Similarity import WeightMetric
+    from PyQuN_Lab.Similarity import WeightMetric, JaccardIndex, Similarity
 
     loader = CSVLoader("C:/Users/41766/Desktop/full_subjects/hospitals.csv", StringAttribute)
-    out = loader.parse_file()
+    out = loader.parse_input()
     model_set = out.model_set
+    print(model_set)
     cs = NNCandidateSearch()
     candidates = cs.candidate_search(model_set)
     similarity = WeightMetric(model_set)
-    matching = GreedyMatching().match(model_set, candidates, similarity)
-    print("attack")
+    matching = GreedyMatching(candidates, similarity).match(model_set)
+    print(matching)

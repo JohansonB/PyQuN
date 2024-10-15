@@ -1,75 +1,83 @@
 from abc import ABC, abstractmethod
+from typing import Iterable
 
-from PyQuN_Lab.DataModel import Match
+from PyQuN_Lab.DataModel import Match, Element, ModelSet
 
 
 class ShouldMatchStrategy(ABC):
     @abstractmethod
-    def should_match(self, similarity, m1, m2, e1, e2):
+    def should_match(self, similarity:'Similarity', matches:Iterable[Match], elements:Iterable[Element]) -> bool:
         pass
 
 
 class GreedySMStrategy(ShouldMatchStrategy):
     def should_match(self, similarity, matches, elements=None):
-        similarity.similarity(Match.merge_matches(matches)) > sum([similarity.similarity(m) for m in matches])
+        return similarity.similarity(Match.merge_matches(*matches)) > sum([similarity.similarity(m) for m in matches])
 
 
 class ThresholdSMStrategy(ShouldMatchStrategy):
-    def __init__(self, threshold=0.3):
+    def __init__(self, threshold=0.25):
         self.threshold = threshold
 
     def should_match(self, similarity, matches, elements=None):
-        similarity(Match.merge_matches(matches)) >= self.threshold
+        return similarity.similarity(Match.merge_matches(*matches)) >= self.threshold
 
 
 class Similarity(ABC):
-    def __init__(self, strategy):
+    def __init__(self, strategy:ShouldMatchStrategy) -> None:
         self.strategy = strategy
     @abstractmethod
-    def similarity(self, match):
+    def similarity(self, match:Match):
         pass
     @abstractmethod
-    def should_match(self, matches, elements):
+    def should_match(self, matches:Iterable[Match], elements:Iterable[Element]):
         pass
 
-#needs debugging foso
+#the Modelset is required to compute the weihtmetric, since the formula includes the number of models in the model_set
+#however this is just a normalizing constant which does not influence the greedy should_match strategy, hence n
+#is set to 1 incase no model_set is provided
 class WeightMetric(Similarity):
-    def __init__(self, model_set, strategy=GreedySMStrategy()):
-        self.n = len(model_set)
+    def __init__(self, model_set:ModelSet = None, strategy:ShouldMatchStrategy = GreedySMStrategy()):
+        if model_set is None:
+            self.n = 1
+        else:
+            self.n = len(model_set)
         super().__init__(strategy)
 
     def similarity(self, match):
-        dic = {}
+        attr_count = {}
         for ele in match:
             for att in ele:
-                if att not in dic:
-                    dic[att] = 1
+                if att not in attr_count:
+                    attr_count[att] = 1
                 else:
-                    dic[att] +=  1
+                    attr_count[att] += 1
 
-        dic2 = {}
-        for key, value in dic.items():
-            if value not in dic2:
-                dic2[value] = 1
+        attr_count_count = {}
+        for key, value in attr_count.items():
+            if value not in attr_count_count:
+                attr_count_count[value] = 1
             else:
-                dic2[value] += 1
+                attr_count_count[value] += 1
         sum = 0
-        for key, value in dic2.items():
-            if key>=2:
-                sum += key**2*value
-        return sum / (self.n**2*len(dic))
+        for key, value in attr_count_count.items():
+            if key >= 2:
+                sum += key ** 2 * value
+        return sum / (self.n ** 2 * len(attr_count))
 
     def should_match(self, matches, elements=None):
         return self.strategy.should_match(self,matches,elements)
 
+    def set_modelset(self, model_set:ModelSet) -> None:
+        self.n = len(model_set)
+
 
 class JaccardIndex(Similarity):
-    def __init__(self, threshold, strategy=ThresholdSMStrategy()):
-        self.threshold = threshold
+    def __init__(self, strategy:ShouldMatchStrategy = ThresholdSMStrategy()) -> None:
         super().__init__(strategy)
 
-    def similarity(self, elements):
-        sets = [set(element) for element in elements]
+    def similarity(self, match):
+        sets = [set(element) for element in match]
         intersection = set.intersection(*sets)
         union = set.union(*sets)
         return len(intersection)/len(union)

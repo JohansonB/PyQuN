@@ -1,25 +1,27 @@
 from abc import ABC, abstractmethod
+from typing import List
 
 from sklearn.neighbors import KDTree, BallTree
 
-from PyQuN_Lab.DataModel import MatchCandidates, Match, MatchViolation
-from PyQuN_Lab.Vectorization import MeanCountVectorizer
+from PyQuN.Similarity import Similarity
+from PyQuN_Lab.DataModel import MatchCandidates, Match, MatchViolation, Element, ModelSet
+from PyQuN_Lab.Vectorization import MeanCountVectorizer, VectorizedModelSet, Vectorizer
 
 
 class KNN(ABC):
     #takes as input a vectorized model set to initialize the KNN search
     @abstractmethod
-    def set_data(self, vm_set):
+    def set_data(self, vm_set:VectorizedModelSet) -> None:
         pass
     #takes as input an element form the vm_set and return the closest neighbours elements of the input element
     #the parameter size determines the size of the neighbourhood
     @abstractmethod
-    def get_neighbours(self,element, size):
+    def get_neighbours(self,element:Element, size:int) -> List[Element]:
         pass
 
 
 class BFKNN(KNN):
-    def __init__(self, similarity):
+    def __init__(self, similarity:Similarity) -> None:
         self.similarity = similarity
         self.vm_set = None
 
@@ -67,12 +69,12 @@ class TreeKNN(KNN):
 class CandidateSearch(ABC):
     # takes as input a model set and produces a candidate set of matches which are non mutually exclusive
     @abstractmethod
-    def candidate_search(self, model_set):
+    def candidate_search(self, model_set:ModelSet) -> MatchCandidates:
         pass
 
 
 class NNCandidateSearch(CandidateSearch):
-    def __init__(self,neighbourhood_size=10, vectorizer=MeanCountVectorizer(), knn=TreeKNN()):
+    def __init__(self,neighbourhood_size:int = 10, vectorizer:Vectorizer = MeanCountVectorizer(), knn:KNN = TreeKNN()) -> None:
         self.neighbourhood_size = neighbourhood_size
         self.vectorizer = vectorizer
         self.knn = knn
