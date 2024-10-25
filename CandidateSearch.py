@@ -3,7 +3,7 @@ from typing import List
 
 from sklearn.neighbors import KDTree, BallTree
 
-from PyQuN.Similarity import Similarity
+from PyQuN_Lab.Similarity import Similarity
 from PyQuN_Lab.DataModel import MatchCandidates, Match, MatchViolation, Element, ModelSet
 from PyQuN_Lab.Vectorization import MeanCountVectorizer, VectorizedModelSet, Vectorizer
 
@@ -94,6 +94,5 @@ class NNCandidateSearch(CandidateSearch):
                     pass
         return mc
 
-if __name__ == "__main__":
-    TREEKNN().set_data()
+
 

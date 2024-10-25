@@ -1,11 +1,14 @@
+import copy
+import random
 import uuid
 from abc import ABC, abstractmethod
-import typeguard
 
 import numpy as np
+import pickle
 from typing import Any, Union, Iterable, Set
 from collections import OrderedDict
 
+from PyQuN_Lab.Utils import store_obj, load_obj
 from PyQuN_Lab.Vectorization import VectorizedModelSet, Vectorizer
 
 class DataModel(ABC):
@@ -89,6 +92,13 @@ class Element:
         self.ele_id = uuid.uuid4()
         self.name = name
         self.model_id = None
+        self.custom_id = None
+
+    def set_custom_id(self, custom_id:int) -> None:
+        self.custom_id = custom_id
+
+    def get_custom_id(self) -> int:
+        return self.custom_id
 
     def get_name(self) -> str:
         return self.name
@@ -148,16 +158,32 @@ class Model:
     def set_model_set(self, model_set : 'ModelSet') -> None:
         self.model_set = model_set
 
+    def set_elements(self, eles : Iterable[Element]) -> None:
+        if self.model_set is not None:
+            for e in self.elements:
+                self.model_set.notify_ele_del(e)
+            for e in eles:
+                self.model_set.notify_ele_add(e)
+        self.elements = set(eles)
+
+
 
 
     def add_element(self, element:Element) -> None:
         self.elements.add(element)
         element.set_model_id(self.id)
-        self.model_set.notify_ele_add(element)
+        if self.model_set is not None:
+            self.model_set.notify_ele_add(element)
+
+    def shuffle_elements(self):
+        li = list(self.elements)
+        random.shuffle(li)
+        self.elements = set(li)
 
     def remove_element(self, element:Element) -> None:
         self.elements.remove(element)
-        self.model_set.notify_ele_del(element)
+        if self.model_set is not None:
+            self.model_set.notify_ele_del(element)
 
     def get_id(self) -> uuid.UUID:
         return self.id
@@ -214,6 +240,36 @@ class ModelSet(DataModel):
 
     def __repr__(self):
         return f"ModelSet(num_models={len(self.models)}, num_elements={len(self.get_elements())})"
+
+    def get_models(self) -> Set[Model]:
+        return self.models
+
+    def get_subset(self, models: Union[Iterable[uuid.UUID], int]) -> 'ModelSet':
+        if isinstance(models, int):
+            models = list(self.models)[:models]
+        else:
+            models = [self.get_by_id(m) for m in models]
+        ze_copy = copy.deepcopy(models)
+        return ModelSet(set(ze_copy))
+
+    def shorten(self, factor : float) -> 'ModelSet':
+        ze_copy = copy.deepcopy(self.models)
+        ret = ModelSet(ze_copy)
+        for m in ze_copy:
+            cur_len = len(m)*factor
+            m.set_elements(list(m.get_elements())[:cur_len])
+        return ret
+
+    def shuffle_models(self):
+        li = list(self.models)
+        random.shuffle(li)
+        self.models = set(li)
+
+    def shuffle_elements(self):
+        for m in self.models:
+            m.shuffle_elements()
+
+
 
     def _innit_id_map(self) -> None:
         for model in self.models:
@@ -441,6 +497,20 @@ class Matching:
         matches_preview = ', '.join([repr(match) for match in list(self.matches)[:3]])  # Show up to 3 matches
         return f"Matching(num_matches={len(self.matches)}, matches=[{matches_preview}]...)"
 
+    def is_mutual_exclusive(self, match):
+        for e in match:
+            for m in self.matches:
+                if e in m:
+                    return False
+        return True
+
+
+    def add_match(self, match, do_check = True):
+        if do_check:
+            if not self.is_mutual_exclusive(match):
+                raise Exception("The match you are trying to add violates mutual exclusivity. A match contained"
+                                "in the Matching allready contains one of the elements in the input match")
+        self.matches.add(match)
     @staticmethod
     def trivial_matching(model_set:ModelSet) -> 'Matching':
         matching = Matching()
@@ -448,6 +518,16 @@ class Matching:
         for element in model_set.get_elements():
             matching.matches.add(Match({element}))
         return matching
+
+    def __iter__(self):
+        return iter(self.matches)
+
+    def store(self, path: str) -> None:
+        store_obj(self,path)
+
+    @staticmethod
+    def load(path: str) -> 'Matching':
+        return load_obj(path)
 
 
 if __name__ == "__main__":

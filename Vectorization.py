@@ -1,7 +1,6 @@
 from abc import ABC, abstractmethod
 import numpy as np
 
-from PyQuN.Model import Element
 
 
 class Vectorizer(ABC):
@@ -9,7 +8,7 @@ class Vectorizer(ABC):
 
 
     @abstractmethod
-    def vectorize(self, element:Element) -> np.ndarray:
+    def vectorize(self, element:'Element') -> np.ndarray:
         #takes as input an element and returns a vector representation of it
         pass
 
@@ -21,7 +20,7 @@ class Vectorizer(ABC):
 #create a 0-1 vector where each entry of the vetor represents an attribute in the attribute space
 #for each element a 0 represents the absence and a 1 the presence of said attribute
 class ZeroOneVectorizer(Vectorizer):
-    def __init__(self, model_set):
+    def __init__(self, model_set:'ModelSet'):
         self.attr_index_map = {}
         att_count = 0
         # iterate over all elements and attributes and store in a dic the mapping from attributes to vector indices
@@ -34,7 +33,7 @@ class ZeroOneVectorizer(Vectorizer):
         self.vec_dim = len(self.attr_index_map)
 
 
-    def vectorize(self, element):
+    def vectorize(self, element:'Element'):
         vec = np.zeros(self.vec_dim)
         for attr in element:
             vec[self.attr_index_map[attr]] = 1
@@ -46,7 +45,7 @@ class ZeroOneVectorizer(Vectorizer):
 
 class MeanCountVectorizer(Vectorizer):
 
-    def vectorize(self, element):
+    def vectorize(self, element:'Element'):
         vec = np.zeros(2)
         vec[0] = len(element)
         ave = 0
@@ -83,10 +82,10 @@ class VectorizedModelSet:
     def get_vec_mat(self):
         return self.vec_mat
 
-    def get_vec_index(self, element:Element) -> int:
+    def get_vec_index(self, element:'Element') -> int:
         return self.id_index_map[element.get_id()]
 
-    def get_ele_by_index(self, index:int) -> Element:
+    def get_ele_by_index(self, index:int) -> 'Element':
         return self.model_set.get_by_id(self.index_id_map[index])
 
 

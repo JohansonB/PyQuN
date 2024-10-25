@@ -37,11 +37,9 @@ class Similarity(ABC):
 #however this is just a normalizing constant which does not influence the greedy should_match strategy, hence n
 #is set to 1 incase no model_set is provided
 class WeightMetric(Similarity):
-    def __init__(self, model_set:ModelSet = None, strategy:ShouldMatchStrategy = GreedySMStrategy()):
-        if model_set is None:
-            self.n = 1
-        else:
-            self.n = len(model_set)
+    def __init__(self, num_modles:int = 1, strategy:ShouldMatchStrategy = GreedySMStrategy()):
+
+        self.n = num_modles
         super().__init__(strategy)
 
     def similarity(self, match):

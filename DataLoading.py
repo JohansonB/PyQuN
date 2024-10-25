@@ -1,19 +1,43 @@
 import csv
+import pickle
+from typing import Type, List
 from abc import ABC, abstractmethod
 
-from PyQuN_Lab.DataModel import ModelSet, Model, Element, StringAttribute
+import numpy as np
+
+from PyQuN_Lab.DataModel import ModelSet, Model, Element, StringAttribute, DataModel
+from PyQuN_Lab.Utils import store_obj, load_obj
+
+
+class MetaData:
+    pass
 
 
 class DataSet:
-    def __init__(self, metadata, model_set):
+    def __init__(self, metadata: MetaData, data_model: DataModel):
         self.metadata = metadata
-        self.model_set = model_set
+        self.data_model = data_model
+
+    def get_data_model(self) -> DataModel:
+        return self.data_model
+
+    def store(self, path: str) -> None:
+        store_obj(self,path)
+
+    @staticmethod
+    def load(path: str) -> 'DataSet':
+        return load_obj(path)
+
 
 
 
 class DataLoader(ABC):
-    def __init__(self, attribute_class):
+    def __init__(self, attribute_class: Type = StringAttribute):
         self.attribute_class = attribute_class
+        self.url = None
+
+    def set_attribute_class(self, ze_class: Type) -> None:
+        self.attribute_class = ze_class
 
     #returns a string encoding of the next attribute in the input file
     #should return the first attribute in the file when called the first time
@@ -53,6 +77,10 @@ class DataLoader(ABC):
     def last_model(self):
         pass
 
+    def read_file(self, url: str) -> DataSet:
+        self.url = url
+        return self.parse_input()
+
 
 
 
@@ -80,7 +108,7 @@ class DataLoader(ABC):
     #the entries of the matrix are the elements attributes
     #the second list contains the size of each model
 class ArrayLoader(DataLoader):
-    def __init__(self, attribute_class, data, separations, element_names=None):
+    def __init__(self, attribute_class: Type = StringAttribute, data: np.ndarray = None, separations: List[int] = None, element_names: List[str] = None):
         self.element_names = element_names
         self.rows = data
         self.separations = separations
@@ -89,6 +117,15 @@ class ArrayLoader(DataLoader):
         self.next_stop = separations[0]
         self.stop_count = 1
         super().__init__(attribute_class)
+
+    def set_data(self, data: np.array) -> None:
+        self.rows = data
+
+    def set_separations(self, sep :List[int]) -> None:
+        self.separations = sep
+
+    def set_element_names(self, names: List[str]) -> None:
+        self.element_names = names
 
     def next_attribute(self):
         if self.attr_index is None:
@@ -148,20 +185,22 @@ class ArrayLoader(DataLoader):
 #the first 3 collums of each  row contain the following information:
 # row[0] = Model_ID ; row[1] = element_ID ; row[2] = element_name
 class CSVLoader(ArrayLoader):
-    def __init__(self, data_path, attribute_class):
-        self.data_path = data_path
+    def __init__(self, attribute_class: Type = StringAttribute):
+        super().__init__(attribute_class)
+
+    def read_file(self, url: str) -> DataSet:
         rows = []
         names = []
         lengths = []
-        with open(self.data_path, newline='') as csvfile:
-            reader = csv.reader(csvfile,delimiter=';')
+        with open(url, newline='') as csvfile:
+            reader = csv.reader(csvfile, delimiter=';')
             cur_id = None
             count = 0
             for row in reader:
-                #something is wrong with the encoding, the metadata column entries and the first attribute (model-id, ele-id, ele-name) are
-                #seperated by commas while the remaining with semicolons
+                # something is wrong with the encoding, the metadata column entries and the first attribute (model-id, ele-id, ele-name) are
+                # seperated by commas while the remaining with semicolons
                 first_element_split = row[0].split(',')
-                rows.append([first_element_split[3]]+row[1:])
+                rows.append([first_element_split[3]] + row[1:])
                 names.append(first_element_split[2])
                 if cur_id is None:
                     cur_id = first_element_split[0]
@@ -171,7 +210,11 @@ class CSVLoader(ArrayLoader):
                     count = 0
                 count += 1
             lengths.append(count)
-        super().__init__(attribute_class, rows,lengths,names)
+            self.rows = rows
+            self.separations = lengths
+            self.element_names = names
+        return self.parse_input()
+
 
 
 
