@@ -84,6 +84,7 @@ class NNCandidateSearch(CandidateSearch):
         vm_set = model_set.vectorize(self.vectorizer)
         self.knn.set_data(vm_set)
         for ele in model_set.get_elements():
+            assert ele in vm_set.id_index_map
             neighbours = self.knn.get_neighbours(ele,self.neighbourhood_size)
             for neigh in neighbours:
                 match = Match()

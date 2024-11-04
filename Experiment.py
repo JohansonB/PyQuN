@@ -1,19 +1,21 @@
-import random
+import copy
+import threading
+import time
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
-from types import Union
+from typing import Union, Dict, Any
 from typing import Tuple, List, Iterable
 
+from PyQuN_Lab.EvaluationMetrics import EvaluationMetric
 from PyQuN_Lab.Stopwatch import Stopwatch
 from PyQuN_Lab.DataLoading import DataLoader
 from PyQuN_Lab.DataModel import DataModel, Matching, ModelSet
 from PyQuN_Lab.Strategy import Strategy
 from PyQuN_Lab.Utils import store_obj, load_obj
-import threading
-from queue import Queue
-import time
 from pathlib import Path
+from PyQuN_Lab.concurrency_tools import ReadWriteLock
 import os
+import shutil
 
 class ExperimentResult:
     def __init__(self, experiment_count: int, run_count: int, strategy: Strategy, datamodel: DataModel,
@@ -27,6 +29,7 @@ class ExperimentResult:
         self.dataset_name = dataset_name
         self.experiment_name = experiment_name
         self.match = match
+
 
     def store(self):
         path = str(ExperimentManager.get_results_dir(self.experiment_name, self.og_strategy, self.dataset_name))\
@@ -47,6 +50,10 @@ class ExperimentResults:
         else:
             self.results = []
 
+    def evaluate_metric(self, metric: EvaluationMetric) -> List[float]:
+        return [metric.evaluate(res) for res in self.results]
+
+
     def add_result(self, result: ExperimentResult) -> None:
         self.results.append(result)
 
@@ -66,7 +73,40 @@ class ExperimentResults:
         return ret
 
 
+class ExperimentSummary:
+    def __init__(self, summary : Dict[Dict[List[ExperimentResults]]]):
+        self.summary = summary
+
+
+    def evaluate_metric(self, experiment : Union['Experiment', str], metric : EvaluationMetric) -> 'ExperimentSummary':
+        ze_copy = ExperimentSummary(copy.deepcopy(self.summary))
+
+
+    def eval
+
+
+    @staticmethod
+    def get_summary(experiment : Union['Experiment', str]) -> 'ExperimentSummary':
+        summary = {}
+        if isinstance(experiment, str):
+            experiment = Experiment.load(experiment)
+
+        for d in experiment.get_datasets():
+            summary[d] = {}
+            for s in experiment.get_strategies():
+                summary[d][s] = []
+                for i in range(experiment.get_num_experiments()):
+                    summary[d][s].append(ExperimentResults.load(experiment,d,i))
+
+        return ExperimentSummary(summary)
+
+
+
+
+
+
 class Experiment(ABC):
+
     def __init__(self, name : str, num_experiments: int, strategies : List[str] = [], datasets : List[str] = []):
         self.num_experiments = num_experiments
         self.strategies = strategies
@@ -74,7 +114,7 @@ class Experiment(ABC):
         self.name = name
 
     def store(self) -> None:
-        store_obj("MetaData/Experiment/" + str(self.get_name()))
+        store_obj(self, "MetaData/Experiment/" + str(self.get_name()))
 
     def get_num_experiments(self):
         return self.num_experiments
@@ -114,10 +154,10 @@ class Experiment(ABC):
         return self.name
 
     def get_strategies(self) -> List[str]:
-        self.strategies
+        return self.strategies
 
     def get_datasets(self) -> List[str]:
-        self.datasets
+        return self.datasets
 
 
 class DependantExperiment(Experiment, ABC):
@@ -159,18 +199,19 @@ class DoMatching(IndependentExperiment):
 class VaryDimension(IndependentExperiment):
 
     def __init__(self, num_runs, name : str, num_experiments: int, strategies : List[Strategy] = [], datasets : List[str] = []):
-        self.num_runs = num_runs
+        self.__runs = num_runs
         super().__init__(name, num_experiments, strategies, datasets)
 
     def num_runs(self) -> int:
-        return self.num_runs
+        return self.__runs
 
     def setup_experiment(self, index: int, ze_input: ModelSet, strategy: Strategy) -> Tuple[ModelSet, Strategy]:
-        num_models = int(len(ze_input)*index/self.num_runs)
+        num_models = int(len(ze_input)*index/self.__runs)
         if num_models < 2:
             num_models = 2
         ze_input.shuffle_models()
         return ze_input.get_subset(num_models), strategy
+
 
 class VarySize(IndependentExperiment):
     def __init__(self, init_length: int, num_runs: int, name : str, num_experiments: int, strategies : List[Strategy] = [], datasets : List[str] = []):
@@ -191,58 +232,116 @@ class VarySize(IndependentExperiment):
 
 
 
+
+
+
 #goto make dictionaries thread safe
 
 class ExperimentEnv:
     def __init__(self, experiment: Experiment):
         self.experiment = experiment
-        self.datasets = {}
+
+        self.loader_map_lock = ReadWriteLock()
         self.loader_map = {}
+        self.strategies_lock = ReadWriteLock()
         self.strategies = {}
 
-    def run_experiment(self,index: Union[int,ExperimentResults], strat: str, dataset: str, experiment_count: int) -> ExperimentResult:
-        if strat not in self.strategies:
-            self.strategies[strat] = Strategy.load(strat)
-            self.loader_map[strat] = {}
-        ze_strat = self.strategies[strat]
+    def _access_and_fill_dict(self, lock, dictionary: Dict[str, Any], key: str, load_func) -> Any:
+        """
+        Access a dictionary with read-write locks.
+        If the key is not present, load the value using load_func.
+        Returns the value from the dictionary.
+        """
+        # Try to read the value first
+        lock.read_lock()
+        try:
+            if key in dictionary:
+                return dictionary[key]
+        finally:
+            lock.read_release()
 
-        if dataset not in self.datasets:
-            self.datasets[dataset] = ExperimentManager.load_dataset_path(dataset)
-        path = self.datasets[dataset]
+        # If not found, acquire write lock to fill the dictionary
+        lock.write_lock()
+        try:
+            # Check again after acquiring write lock
+            if key not in dictionary:
+                dictionary[key] = load_func(key)
+            return dictionary[key]
+        finally:
+            lock.write_release()
 
-        if dataset not in self.loader_map[strat]:
-            self.loader_map[strat][dataset] = self.strategies[strat].get_data_loader(path).read_file(path).get_data_model()
-        ze_data = self.loader_map[strat][dataset]
+    def run_experiment(self, index: Union[int, ExperimentResults], strat: str, dataset: str,
+                       experiment_count: int) -> ExperimentResult:
+        try:
+            # Load object into strategies dictionary if necessary
+            ze_strat = self._access_and_fill_dict(
+                self.strategies_lock,
+                self.strategies,
+                strat,
+                lambda s: Strategy.load(s)
+            )
 
-        return self.experiment.run_instance(self, index, ze_data, ze_strat, dataset, experiment_count)
+            # Load object into loader_map dictionary if necessary
+            self._access_and_fill_dict(
+                self.loader_map_lock,
+                self.loader_map,
+                strat,
+                lambda d: {}
+            )
+            path = ExperimentManager.get_dataset_path(dataset)
+            loader = ze_strat.get_data_loader(path)
+            ze_data = self._access_and_fill_dict(
+                self.loader_map_lock,
+                self.loader_map[strat],
+                dataset,
+                lambda d: ze_strat.get_data_loader(path).read_file(path).get_data_model()
+            )
+
+            # Run the experiment instance
+            result = self.experiment.run_instance(index, ze_data, ze_strat, dataset, experiment_count)
+            result.store()
+            return result
+        except Exception as e:
+            import traceback
+            traceback.print_exc()  # This will print the full traceback of the exception
+
+
+
 
 class ExperimentConfig:
     def __init__(self, index: Union[int,ExperimentResults], strat: str, dataset: str, experiment_count: int, experiment: str):
         self.index = index
         self.strat = strat
-        self.dataset = dataset,
+        self.dataset = dataset
         self.experiment_count = experiment_count
+        self.experiment = experiment
 
 
 
 
 class ExperimentManager:
-    def __init__(self):
-        self.experiment_envs = {}
+    __experiment_envs = {}
 
-    def get_unfinished_experiments(self, experiment: str, strategy: str, dataset: str) -> List[ExperimentConfig]:
-        ze_dir = self.get_results_dir(experiment, strategy, dataset)
+    @staticmethod
+    def get_unfinished_experiments(experiment: Union[Experiment,str], strategy: str, dataset: str) -> List[ExperimentConfig]:
         ret = []
 
-        experiment = Experiment.load(experiment)
+        if isinstance(experiment, str):
+            experiment_name = experiment
+            experiment = Experiment.load(experiment)
+        elif isinstance(experiment,Experiment):
+            experiment_name = experiment.get_name()
+
+        ze_dir = ExperimentManager.get_results_dir(experiment_name, strategy, dataset)
+
         num_exp = experiment.get_num_experiments()
-        num_runs = experiment.num_runs()
+        runs = experiment.num_runs()
         max_eles = {}
 
         run_arr = {}
         if ze_dir.exists():
             for i in range(num_exp):
-                run_arr[i] = [False] * num_runs
+                run_arr[i] = [False] * runs
             for f in ze_dir.iterdir():
                 f_int = int(str(f.name))
                 for ff in f.iterdir():
@@ -253,11 +352,11 @@ class ExperimentManager:
                     run_arr[f_int][ff_int] = True
         else:
             for i in range(num_exp):
-                run_arr[i] = [False]*num_runs
+                run_arr[i] = [False]*runs
 
         if experiment.is_sequential():
             for exp_id, maxi in max_eles.items():
-                if maxi < num_runs:
+                if maxi < runs:
                     if exp_id not in max_eles:
                         past = None
                     else:
@@ -268,53 +367,49 @@ class ExperimentManager:
             for exp_id, run_flags in run_arr.items():
                 for i in range(len(run_flags)):
                     if not run_flags[i]:
+
                         ret.append(ExperimentConfig(i, strategy, dataset, exp_id, experiment))
 
         return ret
 
-    def run_sequential_experiment(self, job, experiment, executor):
+    @staticmethod
+    def run_sequential_experiment(job, experiment, executor):
         """
         Wrapper function to run an experiment sequentially.
         After running the experiment, it checks for the next job and submits it.
         """
         # Run the experiment
-        result = self.experiment_envs[experiment.get_name()].run_experiment(
+        result = ExperimentManager.__experiment_envs[experiment.get_name()].run_experiment(
             job.index, job.strat, job.dataset, job.experiment_count
         )
 
-        # Find next unfinished job (you can define the logic for getting the next job)
-        unfinished_jobs = self.get_unfinished_experiments(experiment.get_name(), job.strat, job.dataset)
-        next_job = None
-        for j in unfinished_jobs:
-            if j.index > job.index:  # Find the next job after the current one
-                next_job = j
-                break
-
         # If there is a next job, submit it to the executor
-        if len(job.index)<experiment.num_runs():
+        if len(job.index) < experiment.num_runs():
             job.index = ExperimentResults.load(experiment, job.strat, job.dataset)
-            executor.submit(self.run_sequential_experiment, job, experiment, executor)
+            executor.submit(ExperimentManager.run_sequential_experiment, job, experiment, executor)
 
-    def run_unfinished_experiments(self, executor: ThreadPoolExecutor):
+    @staticmethod
+    def run_unfinished_experiments(executor: ThreadPoolExecutor):
         path =  Path('MetaData/Experiment/')
         for f in path.iterdir():
-            experiment = Experiment.load(f)
-            if experiment.get_name() not in self.experiment_envs:
-                self.experiment_envs[experiment.get_name()] = ExperimentEnv(experiment)
+            experiment = Experiment.load(f.stem)
+            if experiment.get_name() not in ExperimentManager.__experiment_envs:
+                ExperimentManager.__experiment_envs[experiment.get_name()] = ExperimentEnv(experiment)
+
             for s in experiment.get_strategies():
                 for d in experiment.get_datasets():
-                    jobs = self.get_unfinished_experiments(experiment.name,s,d)
+                    jobs = ExperimentManager.get_unfinished_experiments(experiment,s,d)
                     for j in jobs:
                         if not experiment.is_sequential():
                             executor.submit(
-                                self.experiment_envs[experiment.get_name()].run_experiment,
+                                ExperimentManager.__experiment_envs[experiment.get_name()].run_experiment,
                                 j.index,
                                 j.strat,
                                 j.dataset,
                                 j.experiment_count
                             )
                         else:
-                            self.run_sequential_experiment(j,experiment,executor)
+                            executor.submit(ExperimentManager.run_sequential_experiment, j, experiment, executor)
 
 
 
@@ -326,19 +421,15 @@ class ExperimentManager:
     def get_results_dir(experiment: str, strategy: str, dataset: str) -> Path:
         return Path('MetaData/Results/'+experiment+'/'+strategy+'/'+dataset)
 
-    def get_results(self, experiment: str, strategy: str, dataset: str) -> ExperimentResults:
-        dir = self.get_results_dir(experiment,strategy,dataset)
-
-
-
-    def add_strategy(self, experiment: Union[str, Experiment], strategy: Union[Strategy, str]) -> None:
-        experiment_name = self.add_experiment(experiment)
+    @staticmethod
+    def add_strategy( experiment: Union[str, Experiment], strategy: Union[Strategy, str]) -> None:
+        experiment_name = ExperimentManager.add_experiment(experiment)
         if isinstance(strategy, Strategy):
-            if not self.is_stored_strategy(strategy):
+            if not ExperimentManager.is_stored_strategy(strategy):
                 strategy.store()
             strategy_name = strategy.get_name()
         elif isinstance(strategy, str):
-            if not self.is_stored_strategy(strategy):
+            if not ExperimentManager.is_stored_strategy(strategy):
                 raise Exception("no Strategy with that name exists")
             strategy_name = strategy
         
@@ -349,33 +440,64 @@ class ExperimentManager:
         experiment.store()
 
 
-    def add_dataset(self, experiment: Union[str, Experiment], name: str, path: str = None) -> None:
-        experiment_name = self.add_experiment(experiment)
-        store_obj(path, 'MetaData/DatasetPaths/'+name)
-        if isinstance(experiment, str):
-            experiment = Experiment.load(experiment_name)
-        experiment.add_dataset(name)
-        experiment.store()
+    @staticmethod
+    def get_dataset_path(dataset):
+        # Define the base path to the directory containing the datasets
+        base_path = 'Metadata/Datasets'
 
-    def load_dataset_path(self, dataset :str) -> str:
-        return load_obj('MetaData/DatasetPaths/'+dataset)
+        # Iterate over all files in the directory
+        for filename in os.listdir(base_path):
+            # Split the filename and its extension
+            name, ext = os.path.splitext(filename)
+
+            # Check if the filename (without extension) matches the dataset name
+            if name == dataset:
+                # Return the full path to the matched file
+                return base_path+'/'+filename
+
+        # Return None if no matching file is found
+        return None
+
+    @staticmethod
+    def add_dataset(name: str,experiment: Union[str, Experiment] = None, path: str = None) -> None:
+
+
+
+
+        if path is not None:
+            # Extract the extension from the provided path
+            _, ext = os.path.splitext(path)
+            target = os.path.join("Metadata/Datasets", name + ext)
+            # Create directories if they do not exist
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            shutil.copy2(path, target)
+        if experiment is not None:
+            experiment_name = ExperimentManager.add_experiment(experiment)
+            if isinstance(experiment, str):
+                experiment = Experiment.load(experiment_name)
+            experiment.add_dataset(name)
+            experiment.store()
+
+
 
     #checks if the experiment allready exists if only the name is given,
     #If the experiment is given by object it is stored in case it hasn't been yet
     #returns the name of the experiment to unify the representation
-    def add_experiment(self, experiment: Union[str, Experiment]) -> str:
+    @staticmethod
+    def add_experiment(experiment: Union[str, Experiment]) -> str:
         if isinstance(experiment, Experiment):
-            if not self.is_stored_experiment(experiment.get_name()):
+            if not ExperimentManager.is_stored_experiment(experiment.get_name()):
                 experiment.store()
             experiment_name = experiment.get_name()
         else:
-            if not self.is_stored_experiment(experiment):
+            if not ExperimentManager.is_stored_experiment(experiment):
                 raise Exception("no Experiment with that name exists")
             experiment_name = experiment
         return experiment_name
 
-    def set_data_loader(self, strategy: str, file_ending: str, data_loader: DataLoader) -> None:
-        if not self.is_stored_strategy(strategy):
+    @staticmethod
+    def set_data_loader(strategy: str, file_ending: str, data_loader: DataLoader) -> None:
+        if not ExperimentManager.is_stored_strategy(strategy):
             raise Exception("No strategy with the provided name exists")
         s = Strategy.load("MetaData/Strategies/" + strategy)
         s.set_data_loader(file_ending,data_loader)
@@ -391,6 +513,9 @@ class ExperimentManager:
 
     @staticmethod
     def dir_contains_name(dir: str, name: str) -> bool:
+        # Check if the directory exists
+        if not os.path.exists(dir):
+            return False
         directory_path = dir
         for filename in os.listdir(directory_path):
             if os.path.isfile(os.path.join(directory_path, filename)) and name == filename[:-4]:
@@ -404,29 +529,47 @@ class ExperimentManager:
         return ExperimentManager.dir_contains_name('MetaData/Experiments/', experiment)
 
 
+def monitor(executor, check_interval=1):
+    while True:
+        time.sleep(check_interval)
+        que = executor._work_queue
+        if not executor._work_queue.empty():
 
-class JobScout(threading.Thread):
-    _instance = None
-    _lock = threading.lock()
-    _job_queue = None
-
-    def __new__(cls, *args, **kwargs):
-        with cls._lock:
-            if not cls._instance:
-                cls._instance = super().__new__(cls)
-        return cls._instance
-
-    def __init__(self, check_interval=5):
-        self.check_interval = check_interval
-        self.stop_event = threading.Event()
-        self._job_queue = self.init_queue()
-
-    def job_search(self):
-        pass
-
-    def init_queue(self):
-        pass
+            print("Work queue is not empty, tasks may be waiting...")
+        # Additional checks can be added here
 
 
-    def run(self):
-        pass
+
+
+
+if __name__ == "__main__":
+    from PyQuN_Lab.Strategy import RandomMatcher, VanillaRaQuN
+    s1 = RandomMatcher("random")
+    s2 = VanillaRaQuN("raqun")
+    e1 = VaryDimension(5,"vary_dim",5)
+    e2 = VarySize(0.7, 5,"vary_len",5)
+    ExperimentManager.add_experiment(e1)
+    ExperimentManager.add_experiment(e2)
+    ExperimentManager.add_strategy(e1,s1)
+    ExperimentManager.add_strategy(e1,s2)
+    ExperimentManager.add_strategy(e2,s1)
+    ExperimentManager.add_strategy(e2,s2)
+    ExperimentManager.add_dataset("hosp", path="Data/Apogames.csv")
+    ExperimentManager.add_dataset("ppu", path="Data/ppu.csv")
+    ExperimentManager.add_dataset("hosp",e1)
+    ExperimentManager.add_dataset("ppu",e1)
+    ExperimentManager.add_dataset("hosp",e2)
+    ExperimentManager.add_dataset("ppu",e2)
+    e = Experiment.load("vary_len")
+    executor = ThreadPoolExecutor(max_workers=5)
+    ExperimentManager.run_unfinished_experiments(executor)
+    result = ExperimentResults.load(e1,s2,"hosp",0)
+    print("pepe")
+
+
+
+
+
+
+
+

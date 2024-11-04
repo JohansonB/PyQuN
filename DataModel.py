@@ -43,6 +43,10 @@ class Attribute(ABC):
     def parse_string(self, encoding:str) -> None:
         pass
 
+    @abstractmethod
+    def clone(self) -> 'Attribute':
+        pass
+
 
 class DefaultAttribute(Attribute, ABC):
     def __init__(self, value:Any = None) -> None:
@@ -62,6 +66,10 @@ class DefaultAttribute(Attribute, ABC):
 
     def __repr__(self):
         return f"{self.__class__.__name__}(value={self.value})"
+
+
+    def clone(self) -> 'Attribute':
+        return type(self)(self.value)
 
     def parse_string(self, encoding):
         self.value = encoding
@@ -137,6 +145,20 @@ class Element:
     def __hash__(self):
         return hash(self.ele_id)
 
+    #cloned elements retain the id of the original element
+    def clone(self) -> 'Element':
+        attr_set = set()
+        for attr in self.attributes:
+            attr_set.add(attr.clone())
+
+        ele_clone = Element(attr_set)
+        ele_clone.ele_id = self.ele_id
+        ele_clone.name = self.name
+        ele_clone.model_id = self.model_id
+        ele_clone.custom_id = self.custom_id
+
+        return ele_clone
+
 
 class Model:
 
@@ -154,6 +176,14 @@ class Model:
         self.elements = elements
         self.model_set = None
         self.id = uuid.uuid4()
+
+    def clone(self) -> 'Model':
+        ele_set = set()
+        for ele in self.elements:
+            ele_set.add(ele.clone())
+        model_clone = Model(ele_set)
+        model_clone.id = self.id
+        return model_clone
 
     def set_model_set(self, model_set : 'ModelSet') -> None:
         self.model_set = model_set
@@ -201,7 +231,8 @@ class Model:
         return self.id == other.get_id()
 
     def __hash__(self):
-        return hash(self.id)
+        # Use `self.id` if it’s initialized; otherwise, fall back to `id(self)`
+        return hash(getattr(self, 'id', id(self)))
 
     def __repr__(self):
         return f"Model(id={self.id}, num_elements={len(self.elements)})"
@@ -231,6 +262,15 @@ class ModelSet(DataModel):
         if id_dictionary:
             self._innit_id_map()
 
+    def clone(self) -> 'ModelSet':
+        m_set = set()
+        for m in self.models:
+            m_set.add(m.clone())
+        return ModelSet(m_set, self.use_dictionary)
+
+
+
+
 
     def __iter__(self):
         return iter(self.models)
@@ -249,16 +289,20 @@ class ModelSet(DataModel):
             models = list(self.models)[:models]
         else:
             models = [self.get_by_id(m) for m in models]
-        ze_copy = copy.deepcopy(models)
-        return ModelSet(set(ze_copy))
+        ze_copy = self.clone()
+        to_remove = set()
+        for m in ze_copy.get_models():
+            if m not in models:
+                to_remove.add(m)
+        ze_copy.get_models().difference_update(to_remove)
+        return ze_copy
 
     def shorten(self, factor : float) -> 'ModelSet':
-        ze_copy = copy.deepcopy(self.models)
-        ret = ModelSet(ze_copy)
+        ze_copy = self.clone()
         for m in ze_copy:
-            cur_len = len(m)*factor
+            cur_len = int(len(m)*factor)
             m.set_elements(list(m.get_elements())[:cur_len])
-        return ret
+        return ze_copy
 
     def shuffle_models(self):
         li = list(self.models)

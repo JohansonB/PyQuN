@@ -72,7 +72,7 @@ class VectorizedModelSet:
             count = 0
             for element in elements:
                 self.index_id_map.append(element.get_id())
-                self.id_index_map[element.get_id()] = count
+                self.id_index_map[element] = count
                 self.vec_mat[count] = vectorizer.vectorize(element)
                 count += 1
 
@@ -83,10 +83,14 @@ class VectorizedModelSet:
         return self.vec_mat
 
     def get_vec_index(self, element:'Element') -> int:
-        return self.id_index_map[element.get_id()]
+        assert element in self.id_index_map
+        return self.id_index_map[element]
 
     def get_ele_by_index(self, index:int) -> 'Element':
+
         return self.model_set.get_by_id(self.index_id_map[index])
+
+
 
 
 

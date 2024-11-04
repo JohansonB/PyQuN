@@ -7,9 +7,11 @@ from typing import Tuple
 from PyQuN_Lab.CandidateSearch import CandidateSearch, NNCandidateSearch
 from PyQuN_Lab.DataModel import DataModel, Matching, ModelSet
 from PyQuN_Lab.Matching import MatchingStrategy, GreedyMatching, RandomMatching
-from PyQuN_Lab.Stopwatch import StopWatchManager, Stopwatch
+from PyQuN_Lab.Stopwatch import Stopwatch
 from PyQuN_Lab.Utils import store_obj, load_obj
-from PyQuN_Lab.DataLoading import DataLoader
+from PyQuN_Lab.DataLoading import DataLoader, CSVLoader
+
+
 
 
 class Strategy(ABC):
@@ -30,7 +32,16 @@ class Strategy(ABC):
     def get_data_loader(self, file_ending: str) -> DataLoader:
         last_dot_index = file_ending.rfind('.')
         substring = file_ending[last_dot_index + 1:]
-        return self.data_loaders[substring]
+        if substring in self.data_loaders:
+            return self.data_loaders[substring]
+
+        if substring == 'csv':
+            return CSVLoader()
+        else:
+            raise Exception("no dataloader set for said file ending")
+
+
+
 
 
     def store(self) -> None:
@@ -38,7 +49,7 @@ class Strategy(ABC):
 
     @staticmethod
     def load(strategy_name: str) -> 'Strategy':
-        load_obj("MetaData/Strategies/" + strategy_name)
+        return load_obj("MetaData/Strategies/" + strategy_name)
 
 
     @abstractmethod
@@ -50,15 +61,17 @@ class Strategy(ABC):
         return self.name
 
     def timed_match(self, data_model:DataModel) -> Tuple[Matching, Stopwatch]:
-        stopwatch = StopWatchManager()
-        stopwatch.start_timer(self.id,"matching")
+        stopwatch = Stopwatch()
+        stopwatch.start_timer("matching")
         match, s2 = self.match(data_model)
-        stopwatch.stop_timer(self.id,"matching")
+        stopwatch.stop_timer("matching")
         s2.merge(stopwatch)
         return match, s2
 
 
 class RandomMatcher(Strategy):
+    def __init__(self, name: str):
+        super().__init__(name)
 
     def match(self, data_model:ModelSet) -> [Matching, Stopwatch]:
         return RandomMatching().match(data_model), Stopwatch()

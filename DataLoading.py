@@ -114,7 +114,10 @@ class ArrayLoader(DataLoader):
         self.separations = separations
         self.attr_index = None
         self.ele_index = None
-        self.next_stop = separations[0]
+        if separations is not None:
+            self.next_stop = separations[0]
+        else:
+            self.next_stop = None
         self.stop_count = 1
         super().__init__(attribute_class)
 
@@ -152,6 +155,8 @@ class ArrayLoader(DataLoader):
         return len(self.rows[self.ele_index]) - 1 == self.attr_index
 
     def last_element(self):
+        if self.next_stop is None:
+            self.next_stop = self.separations[0]
         if self.ele_index is None:
             return False
         if len(self.rows) - 1 == self.ele_index:
