@@ -19,13 +19,13 @@ def get_all_tuples(elements: Iterable[Element]) -> List[Tuple[Element]]:
 
 class EvaluationMetric(ABC):
     @abstractmethod
-    def __pevaluate(self, matching:Matching) -> float:
+    def _pevaluate(self, matching:Matching) -> float:
         pass
 
     def evaluate(self, matching : Union[Matching, ExperimentResult]) -> float:
         if isinstance(matching, ExperimentResult):
             matching = matching.match
-        return self.__pevaluate(matching)
+        return self._pevaluate(matching)
 
 
 class Weight(EvaluationMetric):
@@ -33,7 +33,7 @@ class Weight(EvaluationMetric):
     def __init__(self, num_models:int = 1) -> None:
         self.weight_metric = WeightMetric(num_models)
 
-    def __pevaluate(self, matching: Matching) -> float:
+    def _pevaluate(self, matching: Matching) -> float:
         tot = 0
         for m in matching:
             tot += self.weight_metric.similarity(m)
@@ -42,7 +42,7 @@ class Weight(EvaluationMetric):
 
 
 class FalseNegative(EvaluationMetric):
-    def __pevaluate(self, matching:Matching) -> float :
+    def _pevaluate(self, matching:Matching) -> float :
         count = 0
         for m1 in matching:
             for e1 in m1:
@@ -57,7 +57,7 @@ class FalseNegative(EvaluationMetric):
 
 class TruePositive(EvaluationMetric):
 
-    def __pevaluate(self, matching: Matching) -> float:
+    def _pevaluate(self, matching: Matching) -> float:
         count = 0
         for match in matching:
             for t in get_all_tuples(match):
@@ -67,7 +67,7 @@ class TruePositive(EvaluationMetric):
 
 class FalsePositive(EvaluationMetric):
 
-    def __pevaluate(self, matching: Matching) -> float:
+    def _pevaluate(self, matching: Matching) -> float:
         count = 0
         for match in matching:
             for t in get_all_tuples(match):
@@ -77,21 +77,21 @@ class FalsePositive(EvaluationMetric):
 
 class Precision(EvaluationMetric):
 
-    def __pevaluate(self, matching: Matching) -> float:
+    def _pevaluate(self, matching: Matching) -> float:
         tp = TruePositive().evaluate(matching)
         fp = FalsePositive.evaluate(matching)
         return tp / (tp+fp)
 
 
 class Recall(EvaluationMetric):
-    def __pevaluate(self, matching: Matching) -> float:
+    def _pevaluate(self, matching: Matching) -> float:
         tp = TruePositive().evaluate(matching)
         fn = FalseNegative().evaluate(matching)
         return tp/(tp+fn)
 
 
 class FMeasure(EvaluationMetric):
-    def __pevaluate(self, matching:Matching) -> float:
+    def _pevaluate(self, matching:Matching) -> float:
         prec = Precision().evaluate(matching)
         rec = Recall().evaluate(matching)
         return prec*rec/(prec+rec)

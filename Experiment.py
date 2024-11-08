@@ -2,11 +2,12 @@ import copy
 import threading
 import time
 from abc import ABC, abstractmethod
+from collections import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from typing import Union, Dict, Any
 from typing import Tuple, List, Iterable
 
-from PyQuN_Lab.EvaluationMetrics import EvaluationMetric
+
 from PyQuN_Lab.Stopwatch import Stopwatch
 from PyQuN_Lab.DataLoading import DataLoader
 from PyQuN_Lab.DataModel import DataModel, Matching, ModelSet
@@ -19,7 +20,7 @@ import shutil
 
 class ExperimentResult:
     def __init__(self, experiment_count: int, run_count: int, strategy: Strategy, datamodel: DataModel,
-                 og_strategy: str, dataset_name: str, experiment_name: str, stopwatch: Stopwatch, match: Matching):
+                 og_strategy: str, dataset_name: str, experiment_name: str, stopwatch: Stopwatch, match: Matching, error: float = None ):
         self.stopwatch = stopwatch
         self.experiment_count = experiment_count
         self.run_count = run_count
@@ -29,6 +30,7 @@ class ExperimentResult:
         self.dataset_name = dataset_name
         self.experiment_name = experiment_name
         self.match = match
+        self.error = error
 
 
     def store(self):
@@ -42,6 +44,14 @@ class ExperimentResult:
                + '/' + str(experiment_count) + '/' + str(run_count)
         return load_obj(path)
 
+    def get_match(self) -> Matching:
+        return self.match
+
+    def set_error(self, error) -> None:
+        self.error = error
+
+    def get_error(self) -> float:
+        return self.error
 
 class ExperimentResults:
     def __init__(self, experiment_results: Iterable[ExperimentResult] = None):
@@ -50,7 +60,7 @@ class ExperimentResults:
         else:
             self.results = []
 
-    def evaluate_metric(self, metric: EvaluationMetric) -> List[float]:
+    def evaluate_metric(self, metric: 'EvaluationMetric') -> List[float]:
         return [metric.evaluate(res) for res in self.results]
 
 
@@ -69,40 +79,97 @@ class ExperimentResults:
             return ExperimentResults()
         ze_dir /= str(experiment_count)
         for f in ze_dir.iterdir():
-            ret.add_result(ExperimentResult.load(experiment, strategy, dataset, experiment_count, int(f.name)))
+            ret.add_result(ExperimentResult.load(experiment, strategy, dataset, experiment_count, int(f.stem)))
         return ret
 
-
-class ExperimentSummary:
-    def __init__(self, summary : Dict[Dict[List[ExperimentResults]]]):
-        self.summary = summary
+    def __iter__(self):
+        return self.results.__iter__()
 
 
-    def evaluate_metric(self, experiment : Union['Experiment', str], metric : EvaluationMetric) -> 'ExperimentSummary':
-        ze_copy = ExperimentSummary(copy.deepcopy(self.summary))
-
-
-    def eval
-
-
-    @staticmethod
-    def get_summary(experiment : Union['Experiment', str]) -> 'ExperimentSummary':
-        summary = {}
+class ResultsIterator(Iterator):
+    def __init__(self, experiment: Union['Experiment', str], memo_size=float("inf")):
         if isinstance(experiment, str):
             experiment = Experiment.load(experiment)
 
-        for d in experiment.get_datasets():
-            summary[d] = {}
-            for s in experiment.get_strategies():
-                summary[d][s] = []
-                for i in range(experiment.get_num_experiments()):
-                    summary[d][s].append(ExperimentResults.load(experiment,d,i))
+        self.experiment = experiment
+        self.datasets = experiment.get_datasets()
+        self.strategies = experiment.get_strategies()
+        self.num_experiments = experiment.get_num_experiments()
+        self.memo_size = memo_size
+        self._cache = {}
 
-        return ExperimentSummary(summary)
+        # Create a flat list of all the (dataset, strategy, experiment index) tuples
+        self.items = [
+            (dataset, strategy, i)
+            for dataset in self.datasets
+            for strategy in self.strategies
+            for i in range(self.num_experiments)
+        ]
+        self.index = 0
+
+    def __iter__(self):
+        # Every time we start a new iteration, we reset the index and cache
+        self.index = 0
+        self._cache.clear()  # Reset the cache for each iteration
+        return self
+
+    def __next__(self) -> Tuple:
+        if self.index >= len(self.items):
+            raise StopIteration
+
+        dataset, strategy, i = self.items[self.index]
+        self.index += 1
 
 
 
+        return dataset, strategy, i, self.get_result(dataset, strategy, i)
 
+
+    def get_result(self, dataset, strategy, i) -> ExperimentResults:
+        if (dataset, strategy, i) not in self._cache:
+            # Load the ExperimentResults for the current (dataset, strategy, index) combination
+            result = ExperimentResults.load(self.experiment.get_name(), strategy, dataset, i)
+            if len(self._cache) < self.memo_size:
+                self._cache[(dataset, strategy, i)] = result
+        else:
+            result = self._cache[(dataset, strategy, i)]
+
+        return result
+
+    def to_dict(self) -> Dict[str, Dict[str, List[ExperimentResults]]]:
+        ret = {}
+        for dataset, strategy, i, res in self:
+            if dataset not in ret:
+                ret[dataset] = {}
+
+            if strategy not in ret[dataset]:
+                ret[dataset][strategy] = []
+
+            ret[dataset][strategy].append(self.get_result(dataset,strategy, i))
+
+        return ret
+
+    def evaluate_metric(self, metric: 'EvaluationMetric') -> None:
+        for dataset, strategy, i, res in self:
+            res.evaluate_metric(metric)
+
+    def to_error_matrix(self, metric: 'EvaluationMetric') -> Dict[str, Dict[str, List[List[float]]]]:
+        ret = {}
+        for dataset, strategy, i, res in self:
+            if dataset not in ret:
+                ret[dataset] = {}
+
+            if strategy not in ret[dataset]:
+                ret[dataset][strategy] = []
+
+            # Ensure the list is large enough to hold the value at index `i`
+            while len(ret[dataset][strategy]) <= i:
+                ret[dataset][strategy].append([])  # Append an empty list if needed
+
+            # Append the errors at index `i` for this dataset-strategy combination
+            ret[dataset][strategy][i] = res.evaluate_metric(metric)
+
+        return ret
 
 
 class Experiment(ABC):
@@ -134,6 +201,12 @@ class Experiment(ABC):
     @abstractmethod
     def num_runs(self) -> int:
         pass
+
+    def index_set(self):
+        return [i for i in range(self.num_runs())]
+
+    def index_name(self):
+        return "run"
 
     @abstractmethod
     def is_sequential(self) -> bool:
@@ -193,7 +266,7 @@ class DoMatching(IndependentExperiment):
         return 1
 
     def setup_experiment(self, index: int, ze_input: DataModel, strategy: Strategy) -> Tuple[DataModel, Strategy]:
-        return ze_input, strategy
+        return ze_input, Strategy.load(strategy.get_name())
 
 
 class VaryDimension(IndependentExperiment):
@@ -210,7 +283,13 @@ class VaryDimension(IndependentExperiment):
         if num_models < 2:
             num_models = 2
         ze_input.shuffle_models()
-        return ze_input.get_subset(num_models), strategy
+        return ze_input.get_subset(num_models), Strategy.load(strategy.get_name())
+
+    def index_set(self):
+        return [((index+1)/self.__runs) for index in range(self.num_runs())]
+
+    def index_name(self):
+        return "relative dimension"
 
 
 class VarySize(IndependentExperiment):
@@ -226,7 +305,13 @@ class VarySize(IndependentExperiment):
         cur_factor = self.init_length + index/self.num_runs()*(1-self.init_length)
         ze_input.shuffle_elements()
         ze_input.shuffle_models()
-        return ze_input.shorten(cur_factor), strategy
+        return ze_input.shorten(cur_factor), Strategy.load(strategy.get_name())
+
+    def index_set(self):
+        return [self.init_length + index/self.num_runs()*(1-self.init_length) for index in range(self.num_runs())]
+
+    def index_name(self):
+        return "relative length"
 
 
 
@@ -563,7 +648,7 @@ if __name__ == "__main__":
     e = Experiment.load("vary_len")
     executor = ThreadPoolExecutor(max_workers=5)
     ExperimentManager.run_unfinished_experiments(executor)
-    result = ExperimentResults.load(e1,s2,"hosp",0)
+    #result = ExperimentResults.load(e1,s2,"hosp",0)
     print("pepe")
 
 

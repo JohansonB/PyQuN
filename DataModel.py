@@ -394,6 +394,9 @@ class Match:
         self.eles = elements
         self.do_check = do_check
 
+    def get_id(self) -> uuid.UUID:
+        return self.id
+
     def __eq__(self, other):
         return self.id == other.get_id()
 
