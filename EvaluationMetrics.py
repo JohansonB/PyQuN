@@ -34,6 +34,11 @@ class Weight(EvaluationMetric):
         self.weight_metric = WeightMetric(num_models)
 
     def _pevaluate(self, matching: Matching) -> float:
+        model_ids = set()
+        for m in matching:
+            for e in m:
+                model_ids.add(e.get_model_id())
+        self.weight_metric.set_num_models(len(model_ids))
         tot = 0
         for m in matching:
             tot += self.weight_metric.similarity(m)

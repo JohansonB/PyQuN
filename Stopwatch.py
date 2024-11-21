@@ -24,7 +24,14 @@ class Stopwatch:
         cur_struct.elapsed = stop_time - cur_struct.start
 
     def merge(self, other: 'Stopwatch') -> None:
-        self.timers.update(other.timers)
+        for name, ts in other.timers.items():
+            if name in self.timers:
+                self.timers[name].elapsed += ts.elapsed
+            else:
+                self.timers[name] = ts
+
+    def get_time(self, name):
+        return self.timers[name].elapsed
 
 
 class StopWatchManager:

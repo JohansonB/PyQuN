@@ -7,20 +7,21 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Union, Dict, Any
 from typing import Tuple, List, Iterable
 
-
 from PyQuN_Lab.Stopwatch import Stopwatch
 from PyQuN_Lab.DataLoading import DataLoader
 from PyQuN_Lab.DataModel import DataModel, Matching, ModelSet
 from PyQuN_Lab.Strategy import Strategy
-from PyQuN_Lab.Utils import store_obj, load_obj
+from PyQuN_Lab.Utils import store_obj, load_obj, set_field
 from pathlib import Path
 from PyQuN_Lab.concurrency_tools import ReadWriteLock
 import os
 import shutil
 
+
 class ExperimentResult:
     def __init__(self, experiment_count: int, run_count: int, strategy: Strategy, datamodel: DataModel,
-                 og_strategy: str, dataset_name: str, experiment_name: str, stopwatch: Stopwatch, match: Matching, error: float = None ):
+                 og_strategy: str, dataset_name: str, experiment_name: str, stopwatch: Stopwatch, match: Matching, error: float = None, store_datamodel:bool = False, store_strategy:bool = False):
+
         self.stopwatch = stopwatch
         self.experiment_count = experiment_count
         self.run_count = run_count
@@ -31,9 +32,15 @@ class ExperimentResult:
         self.experiment_name = experiment_name
         self.match = match
         self.error = error
+        self.store_datamodel = store_datamodel
+        self.store_strategy = store_strategy
 
 
     def store(self):
+        if not self.store_datamodel:
+            self.datamodel = None
+        if not self.store_strategy:
+            self.strategy = None
         path = str(ExperimentManager.get_results_dir(self.experiment_name, self.og_strategy, self.dataset_name))\
                +'/'+str(self.experiment_count)+'/'+str(self.run_count)
         store_obj(self,path)
@@ -52,6 +59,7 @@ class ExperimentResult:
 
     def get_error(self) -> float:
         return self.error
+
 
 class ExperimentResults:
     def __init__(self, experiment_results: Iterable[ExperimentResult] = None):
@@ -120,9 +128,18 @@ class ResultsIterator(Iterator):
         dataset, strategy, i = self.items[self.index]
         self.index += 1
 
-
-
         return dataset, strategy, i, self.get_result(dataset, strategy, i)
+
+    #creates a result map containing all the results for a specific run and repetition
+    def result_map(self, dataset: str, repetition: int, run: int) -> Dict[str, ExperimentResult]:
+        results_map = {}
+        for s in self.experiment.get_strategies():
+            try:
+                results_map[s] = ExperimentResult.load(self.experiment.get_name(),s,dataset,repetition, run)
+            except FileNotFoundError as e:
+                results_map[s] = None
+
+        return results_map
 
 
     def get_result(self, dataset, strategy, i) -> ExperimentResults:
@@ -171,13 +188,16 @@ class ResultsIterator(Iterator):
 
         return ret
 
+    def get_experiment(self):
+        return self.experiment
+
 
 class Experiment(ABC):
 
-    def __init__(self, name : str, num_experiments: int, strategies : List[str] = [], datasets : List[str] = []):
+    def __init__(self, name : str, num_experiments: int, strategies : List[str] = None, datasets : List[str] = None):
         self.num_experiments = num_experiments
-        self.strategies = strategies
-        self.datasets = datasets
+        self.strategies = list(strategies) if strategies is not None else []
+        self.datasets = list(datasets) if datasets is not None else []
         self.name = name
 
     def store(self) -> None:
@@ -282,7 +302,6 @@ class VaryDimension(IndependentExperiment):
         num_models = int(len(ze_input)*index/self.__runs)
         if num_models < 2:
             num_models = 2
-        ze_input.shuffle_models()
         return ze_input.get_subset(num_models), Strategy.load(strategy.get_name())
 
     def index_set(self):
@@ -303,8 +322,6 @@ class VarySize(IndependentExperiment):
 
     def setup_experiment(self, index: int, ze_input: ModelSet, strategy: Strategy) -> Tuple[DataModel, Strategy]:
         cur_factor = self.init_length + index/self.num_runs()*(1-self.init_length)
-        ze_input.shuffle_elements()
-        ze_input.shuffle_models()
         return ze_input.shorten(cur_factor), Strategy.load(strategy.get_name())
 
     def index_set(self):
@@ -314,13 +331,36 @@ class VarySize(IndependentExperiment):
         return "relative length"
 
 
+class VaryParameter(IndependentExperiment):
+    def __init__(
+        self,
+        parameter_name: str,
+        parameter_values: List[Any],
+        name: str,
+        num_experiments: int,
+        strategies: List[Strategy] = [],
+        datasets: List[str] = []
+    ):
+        self.parameter_name = parameter_name
+        self.parameter_values = parameter_values
+        self.__runs = len(parameter_values)
+        super().__init__(name, num_experiments, strategies, datasets)
 
+    def num_runs(self) -> int:
+        return self.__runs
 
+    def setup_experiment(self, index: int, ze_input: DataModel, strategy: Strategy) -> Tuple[DataModel, Strategy]:
 
+        strategy = Strategy.load(strategy.get_name())
+        set_field(strategy, self.parameter_name, self.parameter_values[index])
+        return ze_input, strategy
 
+    def index_set(self) -> List[Any]:
+        return [repr(self.parameter_values)]
 
+    def index_name(self) -> str:
+        return self.parameter_name
 
-#goto make dictionaries thread safe
 
 class ExperimentEnv:
     def __init__(self, experiment: Experiment):
@@ -370,15 +410,14 @@ class ExperimentEnv:
             self._access_and_fill_dict(
                 self.loader_map_lock,
                 self.loader_map,
-                strat,
+                dataset,
                 lambda d: {}
             )
             path = ExperimentManager.get_dataset_path(dataset)
-            loader = ze_strat.get_data_loader(path)
             ze_data = self._access_and_fill_dict(
                 self.loader_map_lock,
-                self.loader_map[strat],
-                dataset,
+                self.loader_map[dataset],
+                ze_strat.get_data_loader(path),
                 lambda d: ze_strat.get_data_loader(path).read_file(path).get_data_model()
             )
 
@@ -474,14 +513,18 @@ class ExperimentManager:
             executor.submit(ExperimentManager.run_sequential_experiment, job, experiment, executor)
 
     @staticmethod
-    def run_unfinished_experiments(executor: ThreadPoolExecutor):
+    def run_unfinished_experiments(executor: ThreadPoolExecutor, excluded_experiments:List[str] = [], excluded_strategies:List[str] = []):
         path =  Path('MetaData/Experiment/')
         for f in path.iterdir():
             experiment = Experiment.load(f.stem)
+            if experiment.get_name() in excluded_experiments:
+                continue
             if experiment.get_name() not in ExperimentManager.__experiment_envs:
                 ExperimentManager.__experiment_envs[experiment.get_name()] = ExperimentEnv(experiment)
 
             for s in experiment.get_strategies():
+                if s in excluded_strategies:
+                    continue
                 for d in experiment.get_datasets():
                     jobs = ExperimentManager.get_unfinished_experiments(experiment,s,d)
                     for j in jobs:
@@ -505,6 +548,11 @@ class ExperimentManager:
     @staticmethod
     def get_results_dir(experiment: str, strategy: str, dataset: str) -> Path:
         return Path('MetaData/Results/'+experiment+'/'+strategy+'/'+dataset)
+
+    @staticmethod
+    def add_strategies(experiment: Union[str, Experiment], strategies: Iterable[Union[Strategy, str]]):
+        for s in strategies:
+            ExperimentManager.add_strategy(experiment,s)
 
     @staticmethod
     def add_strategy( experiment: Union[str, Experiment], strategy: Union[Strategy, str]) -> None:
@@ -544,10 +592,17 @@ class ExperimentManager:
         return None
 
     @staticmethod
+    def add_datasets(names: Iterable[str], experiment: Union[str, Experiment] = None, paths: Iterable[str] = None) -> None:
+        if paths is None:
+            paths = [None]*len(names)
+
+        for n, p in zip(names,paths):
+            ExperimentManager.add_dataset(n,experiment,p)
+
+
+
+    @staticmethod
     def add_dataset(name: str,experiment: Union[str, Experiment] = None, path: str = None) -> None:
-
-
-
 
         if path is not None:
             # Extract the extension from the provided path
@@ -629,27 +684,41 @@ def monitor(executor, check_interval=1):
 
 if __name__ == "__main__":
     from PyQuN_Lab.Strategy import RandomMatcher, VanillaRaQuN
+    from PyQuN_Lab.GeneticMatching import GeneticStrategy
+    from PyQuN_Lab.CandidateSearch import NNCandidateSearch, BFKNN, LSHKNN
+    from PyQuN_Lab.Vectorization import ZeroOneVectorizer, SVDReduction
+
     s1 = RandomMatcher("random")
     s2 = VanillaRaQuN("raqun")
+    s3 = VanillaRaQuN("high_dim_raqun",candidate_search=NNCandidateSearch(vectorizer=ZeroOneVectorizer()))
+    s4 = VanillaRaQuN("bf_raqun", candidate_search=NNCandidateSearch(knn=BFKNN()))
+    s5 = GeneticStrategy("default_genetic")
+    s6 = VanillaRaQuN("svd_k_10_high_dim_raqun",candidate_search=NNCandidateSearch(vectorizer=ZeroOneVectorizer(),reduction=SVDReduction()))
+    s7 = VanillaRaQuN("svd_k_50_high_dim_raqun",candidate_search=NNCandidateSearch(vectorizer=ZeroOneVectorizer(),reduction=SVDReduction(50)))
+    s8 = VanillaRaQuN("LSH_raqun", candidate_search=NNCandidateSearch(vectorizer=ZeroOneVectorizer(),knn=LSHKNN()))
     e1 = VaryDimension(5,"vary_dim",5)
     e2 = VarySize(0.7, 5,"vary_len",5)
+    e3 = DoMatching("do_matching",5)
+    e4 = DoMatching("do_matching_all",5)
+
     ExperimentManager.add_experiment(e1)
     ExperimentManager.add_experiment(e2)
-    ExperimentManager.add_strategy(e1,s1)
-    ExperimentManager.add_strategy(e1,s2)
-    ExperimentManager.add_strategy(e2,s1)
-    ExperimentManager.add_strategy(e2,s2)
+    ExperimentManager.add_experiment(e3)
+    ExperimentManager.add_experiment(e4)
+    ExperimentManager.add_strategies(e1,[s1,s2,s3,s4])
+    ExperimentManager.add_strategies(e2,[s1,s2,s3,s4])
+    ExperimentManager.add_strategies(e3,[s1,s2,s3,s4, s5, s6])
+    ExperimentManager.add_strategies(e4,[s1,s2,s3,s4,s6,s7,s8])
+
     ExperimentManager.add_dataset("hosp", path="Data/Apogames.csv")
     ExperimentManager.add_dataset("ppu", path="Data/ppu.csv")
-    ExperimentManager.add_dataset("hosp",e1)
-    ExperimentManager.add_dataset("ppu",e1)
-    ExperimentManager.add_dataset("hosp",e2)
-    ExperimentManager.add_dataset("ppu",e2)
-    e = Experiment.load("vary_len")
-    executor = ThreadPoolExecutor(max_workers=5)
-    ExperimentManager.run_unfinished_experiments(executor)
-    #result = ExperimentResults.load(e1,s2,"hosp",0)
-    print("pepe")
+    ExperimentManager.add_datasets(["hosp","ppu"],e1)
+    ExperimentManager.add_datasets(["hosp","ppu"],e2)
+    ExperimentManager.add_datasets(["hosp","ppu"],e3)
+    ExperimentManager.add_datasets(["hosp","ppu","argouml","bcms","bcs","ppu_statem","random","randomLoose","randomTight","warehouses"],e4)
+
+    executor = ThreadPoolExecutor(max_workers=1)
+    ExperimentManager.run_unfinished_experiments(executor,excluded_strategies=["default_genetic"])
 
 
 

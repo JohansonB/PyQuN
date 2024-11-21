@@ -69,6 +69,9 @@ class WeightMetric(Similarity):
     def set_modelset(self, model_set:ModelSet) -> None:
         self.n = len(model_set)
 
+    def set_num_models(self, n : int)-> None:
+        self.n = n
+
 
 class JaccardIndex(Similarity):
     def __init__(self, strategy:ShouldMatchStrategy = ThresholdSMStrategy()) -> None:

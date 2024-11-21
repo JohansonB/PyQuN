@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 import numpy as np
 
 from PyQuN_Lab.DataModel import ModelSet, Model, Element, StringAttribute, DataModel
+from PyQuN_Lab.IDFactory import IDFactory
 from PyQuN_Lab.Utils import store_obj, load_obj
 
 
@@ -29,15 +30,27 @@ class DataSet:
         return load_obj(path)
 
 
-
-
 class DataLoader(ABC):
+    @abstractmethod
+    def read_file(self, url: str) -> DataSet:
+        pass
+
+
+class MSLoader(DataLoader,ABC):
     def __init__(self, attribute_class: Type = StringAttribute):
         self.attribute_class = attribute_class
         self.url = None
 
     def set_attribute_class(self, ze_class: Type) -> None:
         self.attribute_class = ze_class
+
+    def __hash__(self):
+        return hash((self.__class__,self.attribute_class))
+
+    def __eq__(self, other):
+        if not isinstance(other, type(self)):
+            return False
+        return self.attribute_class == other.attribute_class
 
     #returns a string encoding of the next attribute in the input file
     #should return the first attribute in the file when called the first time
@@ -85,15 +98,16 @@ class DataLoader(ABC):
 
 
     def parse_input(self):
+        id_fac = IDFactory()
         metadata = self.read_meta_data()
         model_set = ModelSet()
         while not self.last_model():
             self.next_model()
-            cur_model = Model()
+            cur_model = Model(id_fac.generate_id())
             model_set.add_model(cur_model)
             while not self.last_element():
                 self.next_element()
-                cur_element = Element()
+                cur_element = Element(id_fac.generate_id())
                 cur_element.set_name(self.parse_ele_name())
                 cur_model.add_element(cur_element)
                 while not self.last_attribute():
@@ -107,7 +121,7 @@ class DataLoader(ABC):
     #each row of the matrix represents an element.
     #the entries of the matrix are the elements attributes
     #the second list contains the size of each model
-class ArrayLoader(DataLoader):
+class ArrayLoader(MSLoader):
     def __init__(self, attribute_class: Type = StringAttribute, data: np.ndarray = None, separations: List[int] = None, element_names: List[str] = None):
         self.element_names = element_names
         self.rows = data

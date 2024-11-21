@@ -5,14 +5,14 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 import pickle
-from typing import Any, Union, Iterable, Set
+from typing import Any, Union, Iterable, Set, List, Tuple
 from collections import OrderedDict
 
+from PyQuN_Lab.Stopwatch import Stopwatch
 from PyQuN_Lab.Utils import store_obj, load_obj
 from PyQuN_Lab.Vectorization import VectorizedModelSet, Vectorizer
 
-class DataModel(ABC):
-    pass
+
 
 class Attribute(ABC):
     '''smallest component of the RaQuN data model
@@ -85,7 +85,7 @@ class StringAttribute(DefaultAttribute):
 
 class Element:
 
-    def __init__(self, attributes:Set[Attribute] = None, name:str = None) -> None:
+    def __init__(self, ze_id : int, attributes:Set[Attribute] = None, name:str = None) -> None:
         if attributes is None:
             attributes = set()
         else:
@@ -97,10 +97,11 @@ class Element:
                 raise ValueError("All elements of the set must be instances of Attribute.")
 
         self.attributes = attributes
-        self.ele_id = uuid.uuid4()
+        self.ele_id = ze_id
         self.name = name
         self.model_id = None
         self.custom_id = None
+
 
     def set_custom_id(self, custom_id:int) -> None:
         self.custom_id = custom_id
@@ -114,16 +115,16 @@ class Element:
     def add_attr(self, attribute:Attribute) -> None:
         self.attributes.add(attribute)
 
-    def set_model_id(self,model_id:uuid.UUID) -> None:
+    def set_model_id(self,model_id:int) -> None:
         self.model_id = model_id
 
-    def get_id(self) -> uuid.UUID:
+    def get_id(self) -> int:
         return self.ele_id
 
-    def set_element_id(self, element_id:uuid.UUID) -> None:
+    def set_element_id(self, element_id:int) -> None:
         self.ele_id = element_id
 
-    def get_model_id(self) -> uuid.UUID:
+    def get_model_id(self) -> int:
         return self.model_id
 
     def set_name(self, name : str):
@@ -151,8 +152,7 @@ class Element:
         for attr in self.attributes:
             attr_set.add(attr.clone())
 
-        ele_clone = Element(attr_set)
-        ele_clone.ele_id = self.ele_id
+        ele_clone = Element(self.ele_id, attr_set)
         ele_clone.name = self.name
         ele_clone.model_id = self.model_id
         ele_clone.custom_id = self.custom_id
@@ -162,7 +162,7 @@ class Element:
 
 class Model:
 
-    def __init__(self, elements:Set[Element] = None) -> None:
+    def __init__(self,ze_id: int, elements:Set[Element] = None) -> None:
         if elements is None:
             elements = set()
         else:
@@ -175,14 +175,13 @@ class Model:
 
         self.elements = elements
         self.model_set = None
-        self.id = uuid.uuid4()
+        self.id = ze_id
 
     def clone(self) -> 'Model':
         ele_set = set()
         for ele in self.elements:
             ele_set.add(ele.clone())
-        model_clone = Model(ele_set)
-        model_clone.id = self.id
+        model_clone = Model(self.id, ele_set)
         return model_clone
 
     def set_model_set(self, model_set : 'ModelSet') -> None:
@@ -205,17 +204,14 @@ class Model:
         if self.model_set is not None:
             self.model_set.notify_ele_add(element)
 
-    def shuffle_elements(self):
-        li = list(self.elements)
-        random.shuffle(li)
-        self.elements = set(li)
+
 
     def remove_element(self, element:Element) -> None:
         self.elements.remove(element)
         if self.model_set is not None:
             self.model_set.notify_ele_del(element)
 
-    def get_id(self) -> uuid.UUID:
+    def get_id(self) -> int:
         return self.id
 
     def get_elements(self) -> Set[Element]:
@@ -236,6 +232,11 @@ class Model:
 
     def __repr__(self):
         return f"Model(id={self.id}, num_elements={len(self.elements)})"
+
+class DataModel(ABC):
+    @abstractmethod
+    def get_by_id(self, id: int) -> Union[Model, Element]:
+        pass
 
 
 class ModelSet(DataModel):
@@ -284,9 +285,11 @@ class ModelSet(DataModel):
     def get_models(self) -> Set[Model]:
         return self.models
 
-    def get_subset(self, models: Union[Iterable[uuid.UUID], int]) -> 'ModelSet':
+    def get_subset(self, models: Union[Iterable[int], int]) -> 'ModelSet':
         if isinstance(models, int):
-            models = list(self.models)[:models]
+            li = list(self.models)
+            random.shuffle(li)
+            models = li[:models]
         else:
             models = [self.get_by_id(m) for m in models]
         ze_copy = self.clone()
@@ -301,17 +304,14 @@ class ModelSet(DataModel):
         ze_copy = self.clone()
         for m in ze_copy:
             cur_len = int(len(m)*factor)
-            m.set_elements(list(m.get_elements())[:cur_len])
+            li = list(m.get_elements())
+            random.shuffle(li)
+            m.set_elements(li[:cur_len])
         return ze_copy
 
-    def shuffle_models(self):
-        li = list(self.models)
-        random.shuffle(li)
-        self.models = set(li)
 
-    def shuffle_elements(self):
-        for m in self.models:
-            m.shuffle_elements()
+
+
 
 
 
@@ -321,7 +321,7 @@ class ModelSet(DataModel):
             for ele in model:
                 self.id_map[ele.get_id()] = ele
 
-    def _linear_id_search(self, id:uuid.UUID) -> Union[Model, Element]:
+    def _linear_id_search(self, id:int) -> Union[Model, Element]:
         for model in self.models:
             if model.get_id() == id:
                 return model
@@ -331,7 +331,7 @@ class ModelSet(DataModel):
         raise KeyError(f"Id '{id}' was not found in the ModelSet.")
 
     # returns the model/element corresponding to an id
-    def get_by_id(self, id: uuid.UUID) -> Union[Model, Element]:
+    def get_by_id(self, id: int) -> Union[Model, Element]:
         if self.use_dictionary:
             if not self.id_map:
                 self._innit_id_map()
@@ -375,8 +375,15 @@ class ModelSet(DataModel):
                 del self.id_map[ele.get_id()]
 
 
-    def vectorize(self, vectorizer:Vectorizer) -> VectorizedModelSet:
-        return VectorizedModelSet(self, vectorizer)
+    def vectorize(self, vectorizer:Vectorizer, reduction: 'DimensionalityReduction' = None) -> VectorizedModelSet:
+        return VectorizedModelSet(self, vectorizer, reduction)
+
+    def timed_vectorize(self, vectorizer:Vectorizer, reduction: 'DimensionalityReduction' = None) -> Tuple[VectorizedModelSet, Stopwatch]:
+        s = Stopwatch()
+        s.start_timer("vectorization")
+        ret = VectorizedModelSet(self, vectorizer, reduction)
+        s.stop_timer("vectorization")
+        return ret, s
 
 
 class MatchViolation(Exception):
@@ -394,8 +401,11 @@ class Match:
         self.eles = elements
         self.do_check = do_check
 
-    def get_id(self) -> uuid.UUID:
+    def get_id(self) -> int:
         return self.id
+
+    def __len__(self):
+        return len(self.eles)
 
     def __eq__(self, other):
         return self.id == other.get_id()
@@ -424,6 +434,7 @@ class Match:
 
 
     def are_valid(self, elements: Iterable[Element]) -> bool:
+
         seen_eles = set()
 
         for ele in elements:
@@ -444,11 +455,23 @@ class Match:
         # If no violations found
         return True
 
+    @staticmethod
+    def is_disjoint(m1: 'Match', m2: 'Match') -> bool:
+        for e1 in m1.get_elements():
+            if e1 in m2.get_elements():
+                return False
+
         return True
 
     @staticmethod
     def valid_merge(*matches:'Match') -> bool:
+        #check if two matches are the same and return false in this case
+        for i in range(len(matches)):
+            for j in range(i + 1, len(matches)):
+                if matches[i] == matches[j]:
+                    return False
         eles = set()
+
         for m in matches:
             eles.update(m.get_elements())
         return Match().are_valid(eles)
@@ -525,8 +548,13 @@ class MatchCandidates:
 # it enforces that the collection of matches is mutually exclusive
 
 class Matching:
-    def __init__(self) -> None:
-        self.matches = set()
+    def __init__(self, matches: Set[Match] = None) -> None:
+        if matches is None:
+            matches = set()
+        self.matches = matches
+
+    def get_matches(self):
+        return self.matches
 
     def get_match_by_element(self, ele:Element) -> Match:
         for m in self.matches:
@@ -544,12 +572,24 @@ class Matching:
         matches_preview = ', '.join([repr(match) for match in list(self.matches)[:3]])  # Show up to 3 matches
         return f"Matching(num_matches={len(self.matches)}, matches=[{matches_preview}]...)"
 
-    def is_mutual_exclusive(self, match):
-        for e in match:
-            for m in self.matches:
-                if e in m:
-                    return False
-        return True
+    #if match is None check if every match in the matching mutual exclusive
+    #otherwise check if match is mutual exclusive to all matches in the matching
+    def is_mutual_exclusive(self, match = None):
+        if match is None:
+            for m in self:
+                for e in m:
+                    for m2 in self:
+                        if m == m2:
+                            continue
+                        if e in m2:
+                            return False
+            return True
+        else:
+            for e in match:
+                for m in self.matches:
+                    if e in m:
+                        return False
+            return True
 
 
     def add_match(self, match, do_check = True):
@@ -558,6 +598,7 @@ class Matching:
                 raise Exception("The match you are trying to add violates mutual exclusivity. A match contained"
                                 "in the Matching allready contains one of the elements in the input match")
         self.matches.add(match)
+
     @staticmethod
     def trivial_matching(model_set:ModelSet) -> 'Matching':
         matching = Matching()
@@ -570,25 +611,56 @@ class Matching:
         return iter(self.matches)
 
     def store(self, path: str) -> None:
-        store_obj(self,path)
+        store_obj(self.compress(),path)
 
     @staticmethod
     def load(path: str) -> 'Matching':
-        return load_obj(path)
+        return load_obj(path).decompress()
+
+    def compress(self):
+        return CompressedMatching(self)
+
+    def num_elements(self):
+        return sum([len(m) for m in self])
+
+
+
+
+#Matching reduced to ids of elements instead of entire element objects
+class CompressedMatching:
+    def __init__(self, matching: Matching):
+        self.matches = set()
+        for m in matching:
+            cur_m = set()
+            for ele in m:
+                cur_m.add(ele.get_id())
+            self.matches.add(frozenset(cur_m))
+
+    def decompress(self, dataset_path: str, strategy : 'Strategy') -> Matching:
+        ret = Matching()
+        ze_model = strategy.get_data_loader(dataset_path).read_file(dataset_path).get_data_model()
+        for m in self.matches:
+            cur_m = set()
+            for ele_id in m:
+                cur_m.add(ze_model.get_by_id(ele_id))
+            ret.add_match(cur_m,False)
+        return ret
+
+
+
+
+
 
 
 if __name__ == "__main__":
-    from PyQuN_Lab.Matching import GreedyMatching
+    from PyQuN_Lab.Matching import GreedyMatching, RandomMatching
     from PyQuN_Lab.CandidateSearch import NNCandidateSearch
     from PyQuN_Lab.DataLoading import CSVLoader
     from PyQuN_Lab.Similarity import WeightMetric, JaccardIndex, Similarity
 
-    loader = CSVLoader("C:/Users/41766/Desktop/full_subjects/hospitals.csv", StringAttribute)
-    out = loader.parse_input()
-    model_set = out.model_set
-    print(model_set)
-    cs = NNCandidateSearch()
-    candidates = cs.candidate_search(model_set)
-    similarity = WeightMetric(model_set)
-    matching = GreedyMatching(candidates, similarity).match(model_set)
-    print(matching)
+    loader = CSVLoader(StringAttribute)
+    out = loader.read_file("C:/Users/41766/Desktop/full_subjects/hospitals.csv")
+    model_set = out.get_data_model()
+    matching = RandomMatching().match(model_set)
+    li = list(matching.matches)
+    print(Match.valid_merge(li[0],li[0]))
