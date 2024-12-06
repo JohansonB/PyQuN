@@ -20,8 +20,10 @@ class Strategy(ABC):
         self.name = name
         self.data_loaders = {}
 
+
     def get_id(self) -> uuid.UUID:
         return self.id
+
 
     def set_data_loader(self, file_ending: str, data_loader: DataLoader):
         last_dot_index = file_ending.rfind('.')
@@ -39,9 +41,6 @@ class Strategy(ABC):
             return CSVLoader()
         else:
             raise Exception("no dataloader set for said file ending")
-
-
-
 
 
     def store(self) -> None:
@@ -67,7 +66,6 @@ class Strategy(ABC):
         stopwatch.stop_timer("matching")
         s2.merge(stopwatch)
         return match, s2
-
 
 
 

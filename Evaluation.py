@@ -251,6 +251,6 @@ class XYPlot:
 if __name__ == "__main__":
     from PyQuN_Lab.Experiment import ExperimentResult
     #XYPlot().plot("vary_dim", Weight(), AverageAgg(),["random"])
-    view = ResultView("do_matching_all")
+    view = ResultView("do_matching")
     view.print_statistics(Weight())
     #MatchingView.display(ExperimentResult.load("do_matching_all", "svd_k_10_high_dim_raqun", "hosp", 0, 0))

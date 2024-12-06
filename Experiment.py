@@ -363,8 +363,7 @@ class VaryParameter(IndependentExperiment):
 
 
 class ExperimentEnv:
-    def __init__(self, experiment: Experiment):
-        self.experiment = experiment
+    def __init__(self):
 
         self.loader_map_lock = ReadWriteLock()
         self.loader_map = {}
@@ -395,7 +394,7 @@ class ExperimentEnv:
         finally:
             lock.write_release()
 
-    def run_experiment(self, index: Union[int, ExperimentResults], strat: str, dataset: str,
+    def run_experiment(self, experiment : Experiment, index: Union[int, ExperimentResults], strat: str, dataset: str,
                        experiment_count: int) -> ExperimentResult:
         try:
             # Load object into strategies dictionary if necessary
@@ -422,7 +421,7 @@ class ExperimentEnv:
             )
 
             # Run the experiment instance
-            result = self.experiment.run_instance(index, ze_data, ze_strat, dataset, experiment_count)
+            result = experiment.run_instance(index, ze_data, ze_strat, dataset, experiment_count)
             result.store()
             return result
         except Exception as e:
@@ -444,7 +443,7 @@ class ExperimentConfig:
 
 
 class ExperimentManager:
-    __experiment_envs = {}
+    __experiments_env = ExperimentEnv()
 
     @staticmethod
     def get_unfinished_experiments(experiment: Union[Experiment,str], strategy: str, dataset: str) -> List[ExperimentConfig]:
@@ -503,8 +502,8 @@ class ExperimentManager:
         After running the experiment, it checks for the next job and submits it.
         """
         # Run the experiment
-        result = ExperimentManager.__experiment_envs[experiment.get_name()].run_experiment(
-            job.index, job.strat, job.dataset, job.experiment_count
+        result = ExperimentManager.__experiments_env.run_experiment(
+            experiment,job.index, job.strat, job.dataset, job.experiment_count
         )
 
         # If there is a next job, submit it to the executor
@@ -519,8 +518,6 @@ class ExperimentManager:
             experiment = Experiment.load(f.stem)
             if experiment.get_name() in excluded_experiments:
                 continue
-            if experiment.get_name() not in ExperimentManager.__experiment_envs:
-                ExperimentManager.__experiment_envs[experiment.get_name()] = ExperimentEnv(experiment)
 
             for s in experiment.get_strategies():
                 if s in excluded_strategies:
@@ -530,7 +527,8 @@ class ExperimentManager:
                     for j in jobs:
                         if not experiment.is_sequential():
                             executor.submit(
-                                ExperimentManager.__experiment_envs[experiment.get_name()].run_experiment,
+                                ExperimentManager.__experiments_env.run_experiment,
+                                experiment,
                                 j.index,
                                 j.strat,
                                 j.dataset,
@@ -684,22 +682,31 @@ def monitor(executor, check_interval=1):
 
 if __name__ == "__main__":
     from PyQuN_Lab.Strategy import RandomMatcher, VanillaRaQuN
-    from PyQuN_Lab.GeneticMatching import GeneticStrategy
+    from PyQuN_Lab.GeneticMatching import GeneticStrategy, EGRaqunPop
     from PyQuN_Lab.CandidateSearch import NNCandidateSearch, BFKNN, LSHKNN
     from PyQuN_Lab.Vectorization import ZeroOneVectorizer, SVDReduction
+    from PyQuN_Lab.Matching import ExploringGreedyMatching
+    from PyQuN_Lab.Similarity import WeightMetric
 
     s1 = RandomMatcher("random")
     s2 = VanillaRaQuN("raqun")
     s3 = VanillaRaQuN("high_dim_raqun",candidate_search=NNCandidateSearch(vectorizer=ZeroOneVectorizer()))
     s4 = VanillaRaQuN("bf_raqun", candidate_search=NNCandidateSearch(knn=BFKNN()))
     s5 = GeneticStrategy("default_genetic")
+    s9 = GeneticStrategy("genetic_EGRaqun", initializer=EGRaqunPop(candidate_search=NNCandidateSearch(vectorizer=ZeroOneVectorizer(),reduction=SVDReduction(50))))
+    s10 = VanillaRaQuN("expRaqun",candidate_search=NNCandidateSearch(vectorizer=ZeroOneVectorizer(),reduction=SVDReduction(50)),matching_strategy=ExploringGreedyMatching(similarity=WeightMetric(), shuffle_threshold=0.3))
     s6 = VanillaRaQuN("svd_k_10_high_dim_raqun",candidate_search=NNCandidateSearch(vectorizer=ZeroOneVectorizer(),reduction=SVDReduction()))
     s7 = VanillaRaQuN("svd_k_50_high_dim_raqun",candidate_search=NNCandidateSearch(vectorizer=ZeroOneVectorizer(),reduction=SVDReduction(50)))
     s8 = VanillaRaQuN("LSH_raqun", candidate_search=NNCandidateSearch(vectorizer=ZeroOneVectorizer(),knn=LSHKNN()))
     e1 = VaryDimension(5,"vary_dim",5)
     e2 = VarySize(0.7, 5,"vary_len",5)
-    e3 = DoMatching("do_matching",5)
+    e3 = DoMatching("do_matching",1)
+    e7 = DoMatching("do_matching2",1)
+    e8 = DoMatching("do_matching3", 1)
+
     e4 = DoMatching("do_matching_all",5)
+    e5 = DoMatching("do_matching_all_new_Stopwatch3",3)
+    e6 = DoMatching("random", 10)
 
     ExperimentManager.add_experiment(e1)
     ExperimentManager.add_experiment(e2)
@@ -707,18 +714,32 @@ if __name__ == "__main__":
     ExperimentManager.add_experiment(e4)
     ExperimentManager.add_strategies(e1,[s1,s2,s3,s4])
     ExperimentManager.add_strategies(e2,[s1,s2,s3,s4])
-    ExperimentManager.add_strategies(e3,[s1,s2,s3,s4, s5, s6])
+    ExperimentManager.add_strategies(e3,[s1,s2,s3,s4, s9, s6, s10])
+    ExperimentManager.add_strategies(e7,[s1,s2,s3,s4, s9, s6, s10])
+    ExperimentManager.add_strategies(e8,[s1,s2,s3,s4, s9, s6, s10])
+
+
     ExperimentManager.add_strategies(e4,[s1,s2,s3,s4,s6,s7,s8])
+    ExperimentManager.add_strategies(e5, [s1, s2, s3, s6, s7, s8])
+    ExperimentManager.add_strategies(e6,[s1])
+
 
     ExperimentManager.add_dataset("hosp", path="Data/Apogames.csv")
     ExperimentManager.add_dataset("ppu", path="Data/ppu.csv")
     ExperimentManager.add_datasets(["hosp","ppu"],e1)
     ExperimentManager.add_datasets(["hosp","ppu"],e2)
-    ExperimentManager.add_datasets(["hosp","ppu"],e3)
-    ExperimentManager.add_datasets(["hosp","ppu","argouml","bcms","bcs","ppu_statem","random","randomLoose","randomTight","warehouses"],e4)
+    ExperimentManager.add_datasets(["warehouses"],e3)
+    ExperimentManager.add_datasets(["warehouses"],e7)
+    ExperimentManager.add_datasets(["warehouses"],e8)
 
-    executor = ThreadPoolExecutor(max_workers=1)
-    ExperimentManager.run_unfinished_experiments(executor,excluded_strategies=["default_genetic"])
+
+    ExperimentManager.add_datasets(["hosp","ppu","argouml","bcms","bcs","ppu_statem","random","randomLoose","randomTight","warehouses"],e4)
+    ExperimentManager.add_datasets(["hosp", "ppu", "argouml", "bcms", "bcs", "ppu_statem", "random", "randomLoose", "randomTight", "warehouses"],e5)
+    ExperimentManager.add_datasets(["hosp"],e6)
+
+
+    executor = ThreadPoolExecutor(max_workers=10)
+    ExperimentManager.run_unfinished_experiments(executor,excluded_strategies=["default_genetic","genetic_EGRaqun"])
 
 
 

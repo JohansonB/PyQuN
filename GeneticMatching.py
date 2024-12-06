@@ -2,13 +2,13 @@ import random
 from abc import ABC, abstractmethod
 from typing import Tuple, Iterable, List, Union
 
+from PyQuN_Lab.CandidateSearch import NNCandidateSearch
 from PyQuN_Lab.DataModel import DataModel, Matching, Match
 from PyQuN_Lab.EvaluationMetrics import Weight
+from PyQuN_Lab.Matching import ExploringGreedyMatching
 from PyQuN_Lab.Similarity import WeightMetric
 from PyQuN_Lab.Stopwatch import Stopwatch
-from PyQuN_Lab.Strategy import Strategy, RandomMatcher
-
-
+from PyQuN_Lab.Strategy import Strategy, RandomMatcher, VanillaRaQuN
 
 
 class Population:
@@ -60,7 +60,7 @@ class Population:
             num_e = m.num_elements()
             ret.append(self.mutate_matching(m,mutation_rate,merge_rate, max_resamples))
             #assert num_e == ret[-1].num_elements() and ret[-1].is_mutual_exclusive()
-        self.matchings = ret
+        self.matchings.extend(ret)
 
 
 
@@ -103,7 +103,9 @@ class Population:
                 matchings_set.remove(m)
         return Matching(ret)
 
-
+    def best(self):
+        self.matchings.sort(key=lambda x : Weight().evaluate(x),reverse=True)
+        return self.matchings[0]
 
 
 class InitialPopulation(ABC):
@@ -111,9 +113,26 @@ class InitialPopulation(ABC):
     def sample(self, m_s:'Modelset') -> Population:
         pass
 
+class EGRaqunPop(InitialPopulation):
+
+    def __init__(self, num = 1000, candidate_search: 'CandidateSearch' = NNCandidateSearch()
+                 ,similarity: 'Similarity' = WeightMetric(), shuffle_thresh : float = 0.3):
+        self.num = num
+        self.candidate_search = candidate_search
+        self.similarity = similarity
+        self.shuffle_thresh = shuffle_thresh
+
+    def sample(self, m_s: 'Modelset') -> Population:
+        ret = Population()
+        r_s = VanillaRaQuN("temp",candidate_search=self.candidate_search,matching_strategy=ExploringGreedyMatching(self.similarity, shuffle_threshold=self.shuffle_thresh))
+        for i in range(self.num):
+            print("random innit count: " + str(i))
+            ret.add(r_s.match(m_s)[0])
+        return ret
+
 
 class RNGPopulation(InitialPopulation):
-    def __init__(self, num = 100):
+    def __init__(self, num = 1000):
         self.num = num
     def sample(self, m_s: 'Modelset') -> Population:
         ret = Population()
@@ -126,7 +145,7 @@ class RNGPopulation(InitialPopulation):
 
 
 class SelectionStrategy(ABC):
-    def __init__(self,size: int = 50):
+    def __init__(self,size: int = 500):
         self.size = size
     @abstractmethod
     def select(self, pop : Population, size: int) -> Population:
@@ -205,7 +224,7 @@ class Selector:
 
 
 class TournamentSelection(SelectionStrategy):
-    def __init__(self,size: int = 50, tournament_size=2, replacement : bool = True):
+    def __init__(self,size: int = 500, tournament_size=2, replacement : bool = True):
         self.tournament_size = tournament_size
         self.replacement = replacement
         super().__init__(size)
@@ -223,7 +242,7 @@ class TournamentSelection(SelectionStrategy):
 
 
 class RouletteSelection(SelectionStrategy):
-    def __init__(self,size: int = 50, replacement: bool = True):
+    def __init__(self,size: int = 500, replacement: bool = True):
         self.replacement = replacement
         super().__init__(size)
 
@@ -238,15 +257,19 @@ class RouletteSelection(SelectionStrategy):
 
 
 class RankSelection(SelectionStrategy):
-    def __init__(self,size: int = 50):
+    def __init__(self,size: int = 500):
         super().__init__(size)
     def select(self, pop: Population) -> Population:
         w = Weight()
-        return Population(sorted(list(pop), key=lambda m : w.evaluate(m), reverse=True)[:self.size])
+        s_l = list(pop.matchings)
+        sorted(s_l, key=lambda m : w.evaluate(m), reverse=True)[:self.size]
+        print(w.evaluate(s_l[0]))
+        return Population(s_l[:self.size])
+
 
 
 class GeneticStrategy(Strategy):
-    def __init__(self,name : str, initializer: 'InitialPopulation' = RNGPopulation() , selection : 'SelectionStrategy' = TournamentSelection(), mutation_rate: float = 0.1, merge_rate : float = 0.5,  num_iterations: int = 500):
+    def __init__(self,name : str, initializer: 'InitialPopulation' = RNGPopulation, selection : 'SelectionStrategy' = RankSelection(), mutation_rate: float = 0.01, merge_rate : float = 0.5,  num_iterations: int = 500):
         self.initializer = initializer
         self.selection = selection
         self.mutation_rate = mutation_rate
@@ -255,6 +278,7 @@ class GeneticStrategy(Strategy):
         super().__init__(name)
     def match(self, data_model: DataModel) -> Tuple[Matching, Stopwatch]:
         from PyQuN_Lab.EvaluationMetrics import Weight
+        ze_weight = Weight()
 
         pop = self.initializer.sample(data_model)
         for i in range(self.num_iterations):

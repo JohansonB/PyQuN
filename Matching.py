@@ -104,11 +104,11 @@ class RandomMatching(MatchingStrategy):
 
 
 
-
 class GreedyMatching(MatchingStrategy):
     def __init__(self, similarity: Similarity = JaccardIndex(), filter_threshold: float = 0.001) -> None:
         self.similarity = similarity
         self.filter_threshold = filter_threshold
+
 
     def match(self, model_set: ModelSet, candidates: MatchCandidates = None) -> Matching:
         if candidates is None:
@@ -127,6 +127,21 @@ class GreedyMatching(MatchingStrategy):
                 matching.merge_matches(*cur_matches, do_check=False)
 
         return matching
+
+
+class ExploringGreedyMatching(GreedyMatching):
+    def __init__(self, similarity: Similarity = JaccardIndex(), filter_threshold: float = 0.001, shuffle_threshold : float = 0.2):
+        super(ExploringGreedyMatching, self).__init__(similarity, filter_threshold)
+        self.shuffle_threshold = shuffle_threshold
+
+    def match(self, model_set: ModelSet, candidates: MatchCandidates = None) -> Matching:
+        candidates.filter(self.similarity, self.filter_threshold)
+        candidates.sort(self.similarity)
+        candidates.shuffle(self.shuffle_threshold)
+        return super().match(model_set,candidates)
+
+
+
 
 if __name__ == "__main__":
     from PyQuN_Lab.Tests import test_element, test_model

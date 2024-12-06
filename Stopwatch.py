@@ -1,6 +1,7 @@
 import threading
 import uuid
 import time
+import psutil
 
 class TimingStruct:
     def __init__(self):
@@ -12,16 +13,27 @@ class Stopwatch:
     def __init__(self):
         self.timers = {}
 
+    def _get_thread_cpu_times(self, thread_id):
+        # Get CPU times for the thread with the specified ID
+        for thread_info in psutil.Process().threads():
+            if thread_info.id == thread_id:
+                return thread_info.user_time, thread_info.system_time
+        return None, None  # Thread not found
+
     def start_timer(self, name) -> None:
         time_struc = TimingStruct()
-        time_struc.start = time.time()
+        thread_id = threading.get_ident()  # Get the calling thread ID
+        time_struc.start = sum(self._get_thread_cpu_times(thread_id))
         self.timers[name] = time_struc
 
     def stop_timer(self, name: str) -> None:
-        stop_time = time.time()
         cur_struct = self.timers[name]
-        cur_struct.end = stop_time
-        cur_struct.elapsed = stop_time - cur_struct.start
+        cur_struct.end = sum(self._get_thread_cpu_times(threading.get_ident()))
+        cur_struct.elapsed = (
+            cur_struct.end - cur_struct.start
+            if cur_struct.start is not None and cur_struct.end is not None
+            else None
+        )
 
     def merge(self, other: 'Stopwatch') -> None:
         for name, ts in other.timers.items():
@@ -32,6 +44,7 @@ class Stopwatch:
 
     def get_time(self, name):
         return self.timers[name].elapsed
+
 
 
 class StopWatchManager:
@@ -54,7 +67,7 @@ class StopWatchManager:
 
     def start_timer(self, id:uuid.UUID, dataset:str, name:str) -> None:
         time_struc = TimingStruct()
-        time_struc.start = time.time()
+        time_struc.start = time.process_time()
         with self._dic_lock:
             if id not in self.timers:
                 self.timers[id] = {}
@@ -65,7 +78,7 @@ class StopWatchManager:
 
 
     def stop_timer(self, id:uuid.UUID, dataset:str, name:str) -> None:
-        stop_time = time.time()
+        stop_time = time.process_time()
         with self._dic_lock:
             cur_struct = self.timers[id][dataset][name]
             cur_struct.end = stop_time

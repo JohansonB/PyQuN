@@ -148,8 +148,7 @@ class NNCandidateSearch(CandidateSearch):
         s1 = self.knn.timed_set_data(vm_set)
         s1.merge(s)
         for ele in model_set.get_elements():
-            neighbours, s2 = self.knn.timed_get_neighbours(ele,self.neighbourhood_size)
-            s1.merge(s2)
+            neighbours = self.knn.get_neighbours(ele,self.neighbourhood_size)
             for neigh in neighbours:
                 match = Match()
                 try:
