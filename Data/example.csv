@@ -1,0 +1,8 @@
+4,1,Physician,ex_medicalTeam;patient;ward;history
+4,2,History,procedure;patientProfile;nurse;physician
+4,3,AdminAssistant,ex_medicalTeam;calendar
+5,1,Physician,ex_medicalTeam;decision;ward;patient
+5,4,Ward,nurse;physician;technician;room;unit
+5,3,AdminAssistant,ex_medicalTeam;decision
+8,3,AdminAssistant,ex_medicalTeam;calendar;procedure
+8,5,Unit,ex_generalStorage;description;room;display;scanner
