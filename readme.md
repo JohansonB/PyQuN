@@ -17,9 +17,9 @@
 
 Detailed descriptions of each component are available in the respective subdirectories:
 
-- [Dataloader Documentation](./dataloading/README.md)
-- [Experiment Environment & Comparison Framework Documentation](./experiment/README.md)
-- [Visualization Tools Documentation](./evaluation/README.md)
+- [Dataloader](./dataloading)
+- [Experiment Environment & Comparison Framework ](./experiment)
+- [Visualization Tools ](./evaluation)
 
 ---
 
