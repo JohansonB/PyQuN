@@ -17,10 +17,9 @@
 
 Detailed descriptions of each component are available in the respective subdirectories:
 
-- [Dataloader Documentation](./docs/dataloader.md)
-- [Experiment Environment Documentation](./docs/experiment_env.md)
-- [Comparison Framework Documentation](./docs/comparison_framework.md)
-- [Visualization Tools Documentation](./docs/visualization_tools.md)
+- [Dataloader Documentation](./dataloading/README.md)
+- [Experiment Environment & Comparison Framework Documentation](./experiment/README.md)
+- [Visualization Tools Documentation](./evaluation/README.md)
 
 ---
 
