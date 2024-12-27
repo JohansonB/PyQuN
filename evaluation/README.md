@@ -40,12 +40,6 @@ The `XYPlot` class is designed to generate **line plots** comparing different st
 - **Similarity plots** show how different strategies compare across various datasets based on a specific evaluation metric.
 - **Runtime plots** show the comparison of runtime (in seconds) for each strategy across datasets.
 
-### Key Features:
-- **Metric Aggregation**: Allows aggregation of evaluation metrics and runtime data across multiple strategies.
-- **Customizable**: Users can exclude specific strategies from the comparison by providing a list of excluded strategies.
-- **Error and Runtime matrices**: Handles error and runtime matrices, and can aggregate values for visual clarity.
-- **Easy plotting**: Automatically generates line plots with customized titles, labels, and legends for clarity.
-
 ### Example Usage:
 ```python
 xy_plot = XYPlot()
@@ -55,32 +49,9 @@ xy_plot.plot(experiment, metric, aggregator)
 ### Output:
 - **Similarity plots**: Show how each strategy performs relative to the other strategies.
 - **Runtime plots**: Display runtime comparison for each strategy, allowing users to evaluate the efficiency of different approaches.
-
 ---
 
-## 3. **NormalizedResultView**
-
-### Overview
-The `NormalizedResultView` class is used to display **normalized similarity scores** for different strategies in an experiment, relative to a baseline strategy. The class computes and presents the similarity scores, normalized by the baseline strategy's performance, for each strategy across different datasets. This allows for a clearer comparison between the strategies and helps identify which strategies perform better when compared to the baseline.
-
-### Key Features:
-- **Normalization**: The class normalizes the similarity scores of each strategy by dividing them by the performance of a baseline strategy.
-- **Flexible Configuration**: You can exclude specific strategies or datasets from the comparison.
-- **Aggregated Results**: Results are aggregated using a specified aggregator, such as the average (default).
-- **Pretty Table Output**: The results are displayed in a well-formatted table, making it easy to compare the normalized similarity scores across strategies.
-
-### Example Usage:
-```python
-normalized_view = NormalizedResultView(experiment, run=0, repetition=-1, baseline_strategy="BaselineStrategy")
-normalized_view.print_normalized_statistics(metric, baseline_strategy="BaselineStrategy")
-```
-
-### Output:
-The class will output a table showing the **normalized similarity score** for each strategy (excluding the baseline strategy and any excluded strategies) for each dataset. This normalized score reflects how each strategy performs relative to the baseline, making it easier to understand the strategies' relative effectiveness.
-
----
-
-## 4. **ResultView**
+## 3. **ResultView**
 
 ### Overview
 The `ResultView` class is used to display detailed similarity statistics and runtime information for each strategy in an experiment. It computes and aggregates the performance of each strategy on a specific dataset, and displays the results in a clear, tabular format.
@@ -103,3 +74,26 @@ For each dataset, the class will output a table showing:
 - The **similarity score** for each strategy.
 - The **runtime data** for each strategy, sorted by stopwatch keys.
 This helps compare both the effectiveness (similarity) and efficiency (runtime) of each strategy in the experiment.
+
+---
+
+## 4. **NormalizedResultView**
+
+### Overview
+The `NormalizedResultView` class is used to display **normalized similarity scores** for different strategies in an experiment, relative to a baseline strategy. The class computes and presents the similarity scores, normalized by the baseline strategy's performance, for each strategy across different datasets. This allows for a clearer comparison between the strategies and helps identify which strategies perform better when compared to the baseline.
+
+### Key Features:
+- **Normalization**: The class normalizes the similarity scores of each strategy by dividing them by the performance of a baseline strategy.
+- **Flexible Configuration**: You can exclude specific strategies or datasets from the comparison.
+- **Aggregated Results**: Results are aggregated using a specified aggregator, such as the average (default).
+- **Pretty Table Output**: The results are displayed in a well-formatted table, making it easy to compare the normalized similarity scores across strategies.
+
+### Example Usage:
+```python
+normalized_view = NormalizedResultView(experiment, run=0, repetition=-1, baseline_strategy="BaselineStrategy")
+normalized_view.print_normalized_statistics(metric, baseline_strategy="BaselineStrategy")
+```
+
+### Output:
+The class will output a table showing the **normalized similarity score** for each strategy (excluding the baseline strategy and any excluded strategies) for each dataset. This normalized score reflects how each strategy performs relative to the baseline, making it easier to understand the strategies' relative effectiveness.
+
