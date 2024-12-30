@@ -6,3 +6,4 @@ class Statistic(ABC):
     @abstractmethod
     def evaluate(self, match_scores : List[float]) -> float:
         pass
+

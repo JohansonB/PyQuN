@@ -1,7 +1,6 @@
 import random
 from abc import ABC, abstractmethod
-from collections import Iterable
-from typing import Union, Tuple, List
+from typing import Union, Tuple, List, Iterable
 
 from RaQuN_Lab.datamodel.matching.Match import Match
 from RaQuN_Lab.datamodel.matching.Matching import Matching
@@ -120,7 +119,7 @@ class InitialPopulation(ABC):
 class EGRaqunPop(InitialPopulation):
 
     def __init__(self, num = 1000, candidate_search: 'CandidateSearch' = NNCandidateSearch()
-                 ,similarity: 'Similarity' = WeightMetric(), shuffle_thresh : float = 0.3):
+                 ,similarity: 'Similarity' = WeightMetric(), shuffle_thresh : float = 0.8):
         self.num = num
         self.candidate_search = candidate_search
         self.similarity = similarity
@@ -273,7 +272,7 @@ class RankSelection(SelectionStrategy):
 
 
 class GeneticStrategy(Strategy):
-    def __init__(self,name : str, initializer: 'InitialPopulation' = RNGPopulation, selection : 'SelectionStrategy' = RankSelection(), mutation_rate: float = 0.01, merge_rate : float = 0.5,  num_iterations: int = 500):
+    def __init__(self,name : str, initializer: 'InitialPopulation' = EGRaqunPop(), selection : 'SelectionStrategy' = RankSelection(), mutation_rate: float = 0.01, merge_rate : float = 0.5,  num_iterations: int = 500):
         self.initializer = initializer
         self.selection = selection
         self.mutation_rate = mutation_rate

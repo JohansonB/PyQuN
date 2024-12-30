@@ -1,62 +1,53 @@
 
 # this class represents the output of phase 2 of the RaQuN algorithm.
-# the matching Candidates consists of a ordered list of valid matches, without the requirement that the matches need to be
 # mutually exclusive
 import random
 from collections import OrderedDict
 
 
 class MatchCandidates:
-    def __init__(self) -> None:
+    def __init__(self, index : int = 0) -> None:
+        self.index = index
         self.is_sorted = True
         self.is_filtered = True
-        self.matches = OrderedDict()
+        self.matches = []
 
     def __iter__(self):
-        return iter(self.matches.keys())
+        return iter(self.matches)
 
     def add_matches(self, *matches:'Match') -> None:
-        for match in matches:
-            self.matches[match] = None
+        self.matches.extend(matches)
         if len(matches) > 0:
             self.is_sorted = False
             self.is_filtered = False
+
+    def get_index(self, index : int):
+        return self.matches[index]
+
 
     # removes all candidates whoms similarity lies below a certain threshold
     def filter(self, similarity:'Similarity', threshold:float) -> None:
         if self.is_filtered:
             return
-        keys_to_remove = [key for key, value in self.matches.items() if similarity.similarity(key) < threshold]
-        for key in keys_to_remove:
-            del self.matches[key]
+        self.matches = [x for x in self.matches if similarity.similarity(x) >= threshold]
         self.is_filtered = True
 
     # sort candidates matches accoriding to a similarity fucntion
     def sort(self, similarity:'Similarity'):
-        if self.is_sorted:
-            return
-        self.matches = OrderedDict(
-            sorted(self.matches.items(), key=lambda item: similarity.similarity(item[0]), reverse=True))
+        sorted(self.matches, key=lambda x: similarity.similarity(x), reverse=True)
         self.is_sorted = True
 
     # returns the first match of the match candidates, should be called after sorting the matches to get the candidate
     # with the highest similarity
     def head(self) -> 'Match':
-        if self.is_sorted:
-            return next(iter(self.matches))
-        else:
-            raise Exception("you need to call the sort function before calling this method")
+        return self.matches[self.index]
 
     def pop(self) -> 'Match':
-        if self.is_sorted:
-            ne = self.head()
-            del self.matches[ne]
-            return ne
-        else:
-            raise Exception("you need to call the sort function before calling this method")
+        self.index += 1
+        return self.matches[self.index - 1]
 
     def is_empty(self) -> bool:
-        return len(self.matches) == 0
+        return len(self.matches) == self.index
 
 
     def __repr__(self):
@@ -68,17 +59,7 @@ class MatchCandidates:
         if tot_proc <= 0:
             return
 
-        keys = list(self.matches.keys())
-        first_keys = keys[:tot_proc]
-
-        shuffle_items = [(key, self.matches[key]) for key in first_keys]
-        random.shuffle(shuffle_items)
-
-        shuffled_dict = OrderedDict()
-        for key, value in shuffle_items:
-            shuffled_dict[key] = value
-        for key in keys[tot_proc:]:
-            shuffled_dict[key] = self.matches[key]
-
-        self.matches = shuffled_dict
+        first_ms = self.matches[:tot_proc]
+        random.shuffle(first_ms)
+        self.matches = first_ms.extend(self.matches[tot_proc:])
 
