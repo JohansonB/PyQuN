@@ -14,6 +14,9 @@
    - Enables quantitative and qualitative comparison of algorithm outputs.
 4. **Visualization Tools**
    - Visualize matches and comparative results of different algorithms.
+5. **RaQuN Algorithm Variants**
+  - Implements several variants of the RaQuN model matching algorithm.
+  - Introduces a novel variation that applies dimensionality reduction as a preprocessing step, combining the benefits of both high-dimensional and low-dimensional vector encodings.
 
 Detailed descriptions of each component are available in the respective subdirectories:
 
