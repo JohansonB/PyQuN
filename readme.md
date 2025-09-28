@@ -62,8 +62,16 @@ if __name__ == "__main__":
     ExperimentManager.run_unfinished_experiments(ThreadPoolExecutor(max_workers=10))
 ```
 
+
+
 This code snippet demonstrates:
 - Creation of various model matching algorithms.
 - Configuration of experiments.
 - Addition of datasets and strategies to the experiment pipeline.
 - Execution of experiments in parallel using a thread pool.
+
+## Reference
+
+If you use RaQuN Lab in your work, please cite the original RaQuN paper:
+
+> Schultheiß, A., Bittner, P., Boll, A., Grunske, L., Thüm, T., & Kehrer, T. (2022). RaQuN: A generic and scalable n-way model matching algorithm. *Software and Systems Modeling, 22*(5), 1495–1517. https://doi.org/10.1007/s10270-022-01062-5
